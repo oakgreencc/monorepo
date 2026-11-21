@@ -42,7 +42,7 @@ The only view that joins cambium's local heartbeat file with the GitHub queue la
 
 ## Brand Commitments
 
-Part of the oakgreen stack, whose packages carry tree names (graft, cambium, mycelium, canopy, canker, deadwood). The name `canopy` is fixed. No logo or visual identity has been committed.
+Part of the oakgreen stack, whose packages carry tree names (graft, cambium, mycelium, canopy, canker, deadwood). The name `canopy` is fixed. canopy wears the oakgreen.cc brand as the docs site records it in `docs/DESIGN.md` ("The Forest Manual"): the forest-green ramp (Forest Black ground in dark, Moss Paper in light), flat surfaces separated by hairlines, pills for anything pressed, and the tree ring as its mark. The ring in the header and the favicon takes the health colour. Status gold and rust, and the span-family blue and bark, are the only non-green hues.
 
 ## Evidence on Hand
 
