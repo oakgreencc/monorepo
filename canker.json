@@ -1,0 +1,4 @@
+{
+  "include": ["packages/*/src/**/*.{js,mjs,cjs,ts,mts,cts}", "packages/*/bin/*.{js,mjs,cjs}"],
+  "coverage": ["coverage/lcov.info"]
+}
