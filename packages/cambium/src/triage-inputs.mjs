@@ -4,14 +4,15 @@
  * a `q:human` issue only when something changed on it since triage answered needs-human.
  *
  * The fingerprint covers the issue's title and body, its labels (not cambium's own: `q:*`, `why:*`, `wait:*`,
- * `running`), the ids of its human comments (human-reply.mjs: not cambium, not a bot, not a state marker), its
+ * `running`), the ids of its human comments (human-reply.mjs: not cambium, not a bot, not a state marker; or an
+ * answer comment, whoever wrote it), its
  * GitHub `blockedBy` issues and their states, the agent PRs that name it and their states, and
  * {@link TRIAGE_RUBRIC}. `start-triage` records it on the marker (the inputs the worker saw), and `to-human` keeps
  * it only for a needs-human verdict.
  */
 import { createHash } from 'node:crypto'
 import { branchIssue } from './github.mjs'
-import { parseMarker } from './marker.mjs'
+import { isReply, selfLogins } from './human-reply.mjs'
 import { RUNNING } from './labels.mjs'
 
 /**
@@ -26,7 +27,7 @@ import { RUNNING } from './labels.mjs'
  * (phases/dispatch.mjs `triagePrompt`): every fingerprint stops matching, so each `q:human` issue the stall fallback
  * finds involved in a stall is looked at again.
  */
-export const TRIAGE_RUBRIC = 1
+export const TRIAGE_RUBRIC = 2
 
 /** cambium's own labels: moving an issue between queues is not a change triage should see. @param {string} l */
 const cambiumLabel = (l) => l === RUNNING || /^(q|why|wait):/.test(l)
@@ -36,14 +37,14 @@ const cambiumLabel = (l) => l === RUNNING || /^(q|why|wait):/.test(l)
  * @param {{ botLogin?: string | null, rubric?: number }} [o]
  */
 export function triageInputs(issue, snap, { botLogin = null, rubric = TRIAGE_RUBRIC } = {}) {
-  const self = new Set([botLogin, issue.stateComment?.author].filter(Boolean))
+  const self = selfLogins(issue, botLogin)
   return {
     rubric,
     title: issue.title,
     body: issue.body,
     labels: issue.labels.filter((l) => !cambiumLabel(l)).sort(),
     comments: (issue.comments ?? [])
-      .filter((c) => !!c.author && !c.bot && !self.has(c.author) && !parseMarker(c.body))
+      .filter((c) => isReply(c, self))
       .map((c) => String(c.id ?? `${c.author}@${c.createdAt}`))
       .sort(),
     blockedBy: (issue.blockedBy ?? []).map((b) => `${b.number}:${b.state}`).sort(),

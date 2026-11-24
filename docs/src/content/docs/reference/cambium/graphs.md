@@ -159,7 +159,8 @@ The worker's final message ends with a JSON block (the last fenced block of the 
 - A deferred issue whose blockers all closed (one after deferral) is triaged at the next tick.
 - A blocked wait does not count toward `maxDefers`.
 - A human reply wakes a parked issue, and a `q:human` issue with any `why:*` except `why:approve`, back to `start-triage` at attempt 1. The newest 5 replies (2000 characters each) are quoted to triage.
-- A human reply: a comment after the issue entered its state, whose author is not `graft.botLogin`, not the state comment's author, and not a `Bot` account.
+- A human reply: a comment after the issue entered its state, whose author is not `graft.botLogin`, not the state comment's author, and not a `Bot` account. A comment with a state marker never counts.
+- An answer comment counts as a human reply whoever wrote it, the App included: one carrying `<!-- cambium:answer {"graph":"decide","decideAt":"…","answerer":"<login>"} -->`. Triage sees `answerer` as the reply's author. A malformed payload, or one without `answerer`, is ignored. Triage treats an answer with a decision and acceptance checks as normally `actionable`.
 - Closed or relabelled during triage: verdict dropped.
 - `ask` is read only on `needs-human`. An issue waiting on another open issue that is itself a human chore or check is `blocked` by it, not `needs-human`.
 
