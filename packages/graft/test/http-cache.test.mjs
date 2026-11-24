@@ -83,6 +83,28 @@ test('a corrupt entry is a miss; a stale one is pruned on the next write; GRAFT_
   assert.ok(httpCacheFor({ GRAFT_HOME: d }))
 })
 
+test('an entry read by a 304 within the window survives the prune; an unread one of the same age does not', async () => {
+  const d = dir()
+  const gh = taggingGitHub({ version: 1 })
+  const client = createClient({ token: 't', fetch: gh.fetch, cache: etagCache(d) })
+  await client.api('/repos/o/r')
+  await client.api('/repos/o/other')
+  const old = (Date.now() - MAX_AGE_MS - 1000) / 1000
+  for (const name of readdirSync(d)) utimesSync(join(d, name), old, old)
+  assert.equal((await client.raw('/repos/o/r')).cached, true)
+  etagCache(d).set('fresh', { etag: '"c"', text: '{}', next: null })
+  assert.equal(readdirSync(d).length, 2)
+  const reread = gh.seen.length
+  assert.equal((await client.raw('/repos/o/r')).cached, true)
+  assert.equal(gh.seen[reread].inm, '"v1"')
+  assert.equal((await client.raw('/repos/o/other')).cached, undefined)
+  assert.equal(gh.seen[reread + 1].inm, null)
+})
+
+test('touch on a missing entry is a no-op', () => {
+  assert.doesNotThrow(() => etagCache(dir()).touch('nope'))
+})
+
 test('graphql: a RATE_LIMIT error says when the budget resets', async () => {
   const reset = Math.floor(Date.parse('2026-11-24T03:00:00Z') / 1000)
   const fetch = /** @type {typeof globalThis.fetch} */ (

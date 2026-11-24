@@ -166,6 +166,7 @@ export async function request(path, opts = {}, fetchImpl = globalThis.fetch, cac
   }
   if (res.status === 304 && hit) {
     await res.text().catch(() => '')
+    cache?.touch(/** @type {string} */ (key))
     return { status: 200, text: hit.text, json: parseJson(hit.text), next: hit.next, headers, cached: true }
   }
   const text = await res.text()

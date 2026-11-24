@@ -261,7 +261,7 @@ const sameProbe = (a, b) =>
  * snapshot is never older than the probe it is compared by: a change between the two only costs a read.
  * @param {Deps} deps @param {Ctx} ctx @param {string} slug @returns {Promise<Snapshot>}
  */
-async function readRepo(deps, ctx, slug) {
+export async function readRepo(deps, ctx, slug) {
   const every = deps.config.fullReadEvery ?? 1
   const cache = readsOf(deps)
   const full = async (/** @type {FullReadWhy} */ why, /** @type {import('./github.mjs').Probe | null} */ probe) => {
@@ -293,7 +293,10 @@ async function readRepo(deps, ctx, slug) {
   const rateLimit = rl
     ? { ...rl, cost: Math.max(rl.cost, was.snap.rateLimit?.cost ?? 0) }
     : (was.snap.rateLimit ?? null)
-  return { ...structuredClone(was.snap), rateLimit }
+  const snap = { ...structuredClone(was.snap), rateLimit }
+  // Not read this tick: a release part reused waits for the next read, as a kept one does (github.mjs).
+  if (snap.release) snap.release.fresh = false
+  return snap
 }
 
 /** @param {Deps} deps @param {Ctx} ctx */

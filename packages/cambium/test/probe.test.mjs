@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { tick } from '../src/tick.mjs'
+import { tick, readRepo } from '../src/tick.mjs'
 import { normalizeProbe } from '../src/github.mjs'
 import { resolveConfig } from '../src/config.mjs'
 import { harness } from './fakes.mjs'
@@ -195,4 +195,20 @@ test('normalizeProbe: newest updatedAt of issues and PRs, the branch heads, the 
   })
   assert.deepEqual(normalizeProbe({ repository: { base: null } }).heads, { base: null })
   assert.throws(() => normalizeProbe({ data: {} }), /no repository/)
+})
+
+test('a reused snapshot marks its release part not fresh, as a kept one is', async () => {
+  const h = probed({ issues: [task(1)] })
+  const read = h.deps.github.read
+  h.deps.github.read = async (slug, opts) => ({
+    ...(await read(slug, opts)),
+    release: /** @type {any} */ ({ from: 'main', to: 'prod', prs: [], fresh: true }),
+  })
+  const ctx = /** @type {any} */ ({ reads: new Map() })
+  const first = await readRepo(h.deps, ctx, h.deps.config.repos[0].slug)
+  assert.equal(first.release?.fresh, true)
+  h.clock.advance(MIN / 2)
+  const reused = await readRepo(h.deps, ctx, h.deps.config.repos[0].slug)
+  assert.deepEqual(ctx.reads.get(h.deps.config.repos[0].slug), { kind: 'probe', why: null })
+  assert.equal(reused.release?.fresh, false)
 })

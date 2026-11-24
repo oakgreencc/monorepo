@@ -54,7 +54,7 @@ The cost is speed and rate limits: every tick reads GitHub. cambium keeps that t
 
 Each tick first sends a probe per repository, costing about one point of the hourly GraphQL budget: the newest update time of any issue and of any pull request, and the head commit of the base branch. When all of these match the last full read, nothing that read covers has changed, and cambium reuses it. The full read costs about ten points.
 
-Check results do not change a pull request's update time, so the probe cannot see CI finishing. cambium therefore still reads in full every tick while an open agent PR's checks are pending, it is in the merge queue, or GitHub is still working out whether it conflicts. It also reads in full every `fullReadEvery` ticks (four by default), which catches anything else the probe misses, such as a base branch going red. The heartbeat records, per repository, whether each tick probed or read in full.
+Check results do not change a pull request's update time, so the probe cannot see CI finishing. cambium therefore still reads in full every tick while an open agent PR's checks are pending, it is in the merge queue, or GitHub is still working out whether it conflicts. It also reads in full every `fullReadEvery` ticks (four by default), which catches anything else the probe misses, such as a base branch going red. The heartbeat records, per repository, whether each tick probed or read in full. A tick that reuses the last read does not run the release step: like a kept release comparison, it waits for the next full read.
 
 ## One tick
 

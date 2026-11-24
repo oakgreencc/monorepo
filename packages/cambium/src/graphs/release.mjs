@@ -578,8 +578,8 @@ export function promoteStart(pr) {
 export const lastRunKey = (slug) => `release.lastRun:${slug}`
 
 /**
- * The tick's Release step on `engine: "graph"`, per repo with `release` on (and `from` ≠ `to`): release-prepare
- * when it is due, then a release-promote turn for each `q:promote` PR. One repo's failure is logged; the rest
+ * The tick's Release step on `engine: "graph"`, per repo with `release` on (and `from` ≠ `to`), on a tick that read
+ * the release part (`fresh`): release-prepare when it is due, then a release-promote turn for each `q:promote` PR. One repo's failure is logged; the rest
  * still run.
  *
  * @param {import('../tick.mjs').Deps} deps @param {import('../tick.mjs').Ctx} tick
@@ -588,7 +588,8 @@ export async function releaseGraphs(deps, tick) {
   for (const repo of deps.config.repos) {
     const { enabled, time, from, to } = repo.release
     const release = tick.snaps.get(repo.slug)?.release
-    if (!enabled || from === to || !release) continue
+    // A kept release answer (not read this tick, github.mjs) waits for the next read: its PRs may be stale.
+    if (!enabled || from === to || !release || release.fresh === false) continue
     /** @param {PromotionPr} [pr] @returns {ReleaseCtx} */
     const ctxFor = (pr) => ({ ...deps, tick, subject: { slug: repo.slug, repo, release, pr } })
     try {
@@ -634,7 +635,7 @@ export async function runRelease(deps, tick, { graph, slug, pr: only, out }) {
   if (!repo) return { ok: false, error: `${slug} is not in the config` }
   const { from, to } = repo.release
   if (from === to) return { ok: false, error: `${slug}: release.from = release.to (\`${from}\`); nothing to promote` }
-  const snap = await deps.github.read(slug)
+  const snap = await deps.github.read(slug, { fresh: true })
   tick.snaps.set(slug, snap)
   const release = snap.release
   if (!release) return { ok: false, error: `${slug}: no release state in the snapshot` }
