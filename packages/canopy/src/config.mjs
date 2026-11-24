@@ -12,11 +12,13 @@ export const expandHome = (/** @type {string} */ p, home = homedir()) =>
  * Where the heartbeat lives and which repos to read, from flags first, then
  * cambium's own config file. Only `paths` and `repos[].slug`/`path` are read from it.
  *
- * @param {{ state?: string, config?: string, repos?: string[], traces?: string, intake?: string }} flags
+ * @param {{ state?: string, config?: string, repos?: string[], traces?: string, intake?: string, queues?: string }} flags
  * @param {{ env?: Record<string, string | undefined>, home?: string, read?: (p: string) => string }} [deps]
- * @returns {{ statePath: string, tracesPath: string, intakePath: string, repos: string[], configPath: string,
+ * @returns {{ statePath: string, queuesPath: string, tracesPath: string, intakePath: string, repos: string[], configPath: string,
  *   configError: string | null,
  *   briefs: { dir: string, paths: Record<string, string> } }}
+ *   `queuesPath`: cambium's queue view (snapshot.mjs): `--queues`, then the config's `paths.queues`, then
+ *   `<paths.home>/queues.json`.
  *   `briefs`: where cambium writes session briefs (`<home>/briefs`) and each repo's checkout (`repos[].path`).
  */
 export function resolveSettings(
@@ -37,6 +39,8 @@ export function resolveSettings(
   const homeDir = typeof cfg?.paths?.home === 'string' ? cfg.paths.home : '~/.cambium'
   const fromConfig = typeof cfg?.paths?.heartbeat === 'string' ? cfg.paths.heartbeat : join(homeDir, 'state.json')
   const statePath = resolve(expandHome(flags.state ?? fromConfig, home))
+  const queuesFromConfig = typeof cfg?.paths?.queues === 'string' ? cfg.paths.queues : join(homeDir, 'queues.json')
+  const queuesPath = resolve(expandHome(flags.queues ?? queuesFromConfig, home))
   // Where cambium's local collector (otel/otelcol.yaml) writes spans.
   const tracesPath = resolve(expandHome(flags.traces ?? join(homeDir, 'otel', 'traces.jsonl'), home))
   // mycelium's status file (mycelium's README, Status file).
@@ -53,6 +57,7 @@ export function resolveSettings(
   const briefs = { dir: resolve(expandHome(join(homeDir, 'briefs'), home)), paths }
   return {
     statePath,
+    queuesPath,
     tracesPath,
     intakePath,
     repos: [...new Set(/** @type {string[]} */ (listed))],

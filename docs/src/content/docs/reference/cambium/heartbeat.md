@@ -90,6 +90,24 @@ Written at the end of every tick to `paths.heartbeat` (default `~/.cambium/state
 
 `to: null` ends the graph. `when` is the condition's function name, `null` for the fallback edge.
 
+## Queue view (`queues.json`)
+
+Written every tick, after the other steps and before the heartbeat, to `paths.queues` (default `~/.cambium/queues.json`), whole and renamed into place. It is canopy's board, built from the snapshot cambium read that tick, so canopy need not query GitHub for it. Its write is the `queues` step.
+
+| Field         | Meaning                                                                            |
+| ------------- | ---------------------------------------------------------------------------------- |
+| `version`     | `1`. canopy reads no other.                                                        |
+| `writtenAt`   | When it was written.                                                               |
+| `tickSeconds` | `config.tickSeconds`.                                                              |
+| `repos`       | Per repo: `{ slug, ok, error, fetchedAt, columns, prs, stranded }`.                |
+
+- `columns`: `{ intake, waiting, task, running, human, promote }`, placed as in [canopy](/reference/canopy/#queue-placement). Each item is `{ repo, number, title, url, createdAt, updatedAt, labels, why, priority }`; a `waiting` item adds `wait: { kind, reason, until, blockers }`. `promote` includes closed issues awaiting promotion.
+- `prs`: open `agent/*` PRs: `{ repo, number, title, url, branch, draft, checks, tally, inMergeQueue, autoMerge, queue, mergeState, additions, deletions, files, closes, createdAt, updatedAt }`.
+- `stranded`: open issues in no queue whose `agent/*` PR, among the 50 most recently closed unmerged, has no open replacement. Each adds `pr: { number, title, url, branch, closedAt }`.
+- A repo not read this tick (a failed or paused read) keeps its last board, with `ok: false`, the `error`, and the `fetchedAt` of that board.
+
+canopy treats the file as stale once `writtenAt` is more than 3 × `tickSeconds` old, and then reads GitHub itself.
+
 ## `cambium status --json`
 
 Returns `{ "mode", "heartbeat" }`. The mode comes from the SQLite database, so it is available while the daemon is down. Exit 1 when the heartbeat is missing or older than 3 ticks.

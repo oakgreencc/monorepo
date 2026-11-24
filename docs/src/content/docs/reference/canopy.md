@@ -7,7 +7,7 @@ sidebar:
 
 canopy is a local, read-only page over cambium's heartbeat, the GitHub queues, cambium's traces and mycelium's intake sources. It holds no credentials and writes nothing.
 
-Package: `@oakgreencc/canopy`. Node ≥ 22, no runtime dependencies. GitHub is read through `graft graphql`; `graft` must be on `PATH`.
+Package: `@oakgreencc/canopy`. Node ≥ 22, no runtime dependencies. GitHub is read through `graft graphql`; `graft` must be on `PATH`. While cambium runs, the queues come from its [queue view](#queue-view) instead.
 
 ## Commands
 
@@ -23,11 +23,12 @@ Package: `@oakgreencc/canopy`. Node ≥ 22, no runtime dependencies. GitHub is r
 | `--port <n>` | `4317` |
 | `--host <addr>` | `127.0.0.1` |
 | `--state <file>` | cambium config's `paths.heartbeat` (or `<paths.home>/state.json`), else `~/.cambium/state.json` |
+| `--queues <file>` | cambium config's `paths.queues` (or `<paths.home>/queues.json`), else `~/.cambium/queues.json` |
 | `--traces <file>` | `<paths.home>/otel/traces.jsonl` from the cambium config, else `~/.cambium/otel/traces.jsonl` |
 | `--intake <file>` | `$MYCELIUM_STATUS`, else `~/.mycelium/status.json` |
 | `--config <file>` | `$CAMBIUM_CONFIG`, else `~/.cambium/config.json` |
 | `--repo <owner/name>` | Repeatable. Else the config's `repos[].slug`, else the heartbeat's repos. |
-| `--cache <seconds>` | `60`; minimum `15` |
+| `--cache <seconds>` | `60`; minimum `15`. Applies to GitHub reads only. |
 | `--graft <cmd>` | `graft` |
 
 ## Tabs
@@ -136,7 +137,7 @@ Only `GET` and `HEAD` are answered, and only for a loopback `Host` (or the `--ho
 | Field | Shape |
 | --- | --- |
 | `heartbeat` | `{ status, path, message, stale, ageMs, staleAfterMs, data }`. `status`: `ok`, `missing`, `unreadable`, `unknown-version`. `stale` after 3 × `tickSeconds`. |
-| `github` | `{ repos, columns: { intake, waiting, task, running, human, promote }, prs, stranded, flagged, fetchedAt, cached }`. A `human` item with a session brief carries `brief: { path, command }`. Each column and stranded item has `cost`: `{ usd, triage, task, rescue, runs, flagged }`, or `null`. `flagged`: session candidates not in `q:human` or stranded. |
+| `github` | `{ repos, columns: { intake, waiting, task, running, human, promote }, prs, stranded, flagged, fetchedAt, cached, source, fallback }`. `source`: `cambium`, `github` or `mixed`. `fallback`: why canopy read GitHub itself, or `null`. A `human` item with a session brief carries `brief: { path, command }`. Each column and stranded item has `cost`: `{ usd, triage, task, rescue, runs, flagged }`, or `null`. `flagged`: session candidates not in `q:human` or stranded. |
 | `traces` | `{ status, path, message, files, malformed, total, errored, byIssue, progress, recent, flow }`. `status`: `ok`, `missing`, `unreadable`. |
 | `intake` | `{ status, path, message, running, data, activity }`. `status`: `ok`, `missing`, `unreadable`, `unknown-version`. `data.sources[]` adds `state` to the status file's entry. `activity`: `{ bySource: { <source>: { day, week, lastAt } }, recent }`, or `null` without traces. |
 | `cost` | `{ days, flagUsd }`. `days`: the last 7 UTC days, oldest first, each `{ day, triage, task, rescue, total }` in US dollars. `flagUsd`: the heartbeat's `costFlagUsd`, or `null`. |
@@ -149,4 +150,17 @@ Only `GET` and `HEAD` are answered, and only for a loopback `Host` (or the `--ho
 | Traces | The local collector's OTLP/JSON file and rotated backups (`traces-<time>.jsonl`), newest first, up to 64 MB. Re-parsed only when size or mtime changes. |
 | Intake | mycelium's status file, schema `version: 1`. Any other version is reported, not parsed. |
 | Session briefs | `<paths.home>/briefs/` from the cambium config, else `~/.cambium/briefs/`. Checked for each `q:human` item on every `/api/state`. |
-| Queues | GitHub labels, through `graft graphql`. Each repository's answer is cached for `--cache` seconds; a failed refresh keeps the last good answer. |
+| Queues | cambium's [queue view](#queue-view). Else GitHub labels, through `graft graphql`, each repository's answer cached for `--cache` seconds; a failed refresh keeps the last good answer. |
+| Issue pane | GitHub, through `graft graphql`, cached per issue for `--cache` seconds. |
+
+## Queue view
+
+cambium writes its board to [`queues.json`](/reference/cambium/heartbeat/#queue-view-queuesjson) every tick. canopy re-reads it on each `/api/state` and makes no GitHub call for the queues while it is fresh.
+
+canopy queries GitHub for a repository when the file:
+
+- is missing, unreadable or another `version`;
+- is more than 3 × its `tickSeconds` old (90 s at the default 30 s tick), i.e. cambium is down;
+- does not list that repository.
+
+The page then shows a **Queues read from GitHub** banner saying which, and the header shows "GitHub read" instead of "queues read by cambium".

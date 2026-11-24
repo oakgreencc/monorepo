@@ -23,6 +23,7 @@ import { DISPATCH_NOT_BUILT, dispatchNotBuilt } from './phases/dispatch.mjs'
 import { isRepair } from './base-health.mjs'
 import { stopOverdue } from './workers.mjs'
 import { syncBriefs } from './briefs.mjs'
+import { queueView } from './queue-view.mjs'
 import { costDays, costOf, dayOf, overBudget, recordCost } from './cost.mjs'
 
 /**
@@ -40,6 +41,8 @@ import { costDays, costOf, dayOf, overBudget, recordCost } from './cost.mjs'
  *   log: (level: Event['level'], msg: string, where?: { repo?: string, issue?: number }) => void,
  *   events?: () => Event[],
  *   heartbeat?: (state: HeartbeatState) => void | Promise<void>,
+ *   queues?: { write(view: import('./queue-view.mjs').QueuesFile): void | Promise<void>,
+ *     prev?(): import('./queue-view.mjs').QueuesFile | null },
  *   dispatch?: import('./phases/dispatch.mjs').Dispatch,
  *   release?: import('./phases/release.mjs').Release,
  *   tickNumber?: number,
@@ -50,6 +53,8 @@ import { costDays, costOf, dayOf, overBudget, recordCost } from './cost.mjs'
  *   daemonStartedAt?: number,
  *   pid?: number,
  * }} Deps
+ *   `queues`: writes the queue view canopy reads (queue-view.mjs); `prev` is the last one written, whose boards a repo
+ *   not read this tick keeps.
  * @typedef {{ name: string, ok: boolean, ms: number, error: string | null }} StepResult
  * @typedef {{
  *   now: number, mode: import('./store.mjs').Mode, snaps: Map<string, Snapshot>,
@@ -109,6 +114,7 @@ export async function tick(deps) {
     ...(deps.briefs ? /** @type {[string, StepFn][]} */ ([['briefs', briefs]]) : []),
   ]
   for (const [name, fn] of steps) await runStep(deps, ctx, name, () => fn(deps, ctx))
+  if (deps.queues) await runStep(deps, ctx, 'queues', () => writeQueueView(deps, ctx))
   const state = heartbeatState(deps, ctx)
   if (deps.heartbeat) await runStep(deps, ctx, 'heartbeat', async () => deps.heartbeat?.(state))
   return state
@@ -858,6 +864,25 @@ export function heartbeatState(deps, ctx) {
     graphs: graphDescriptions(),
     costFlagUsd: config.costFlagUsd,
   }
+}
+
+// ---- Queue view
+
+/**
+ * canopy's board, from this tick's snapshots (queue-view.mjs). Local files only; runs while paused too.
+ * @param {Deps} deps @param {Ctx} ctx
+ */
+async function writeQueueView(deps, ctx) {
+  if (!deps.queues) return
+  const view = queueView({
+    repos: deps.config.repos.map((r) => r.slug),
+    snaps: ctx.snaps,
+    readErrors: ctx.readErrors,
+    now: deps.clock.now(),
+    tickSeconds: deps.config.tickSeconds,
+    prev: deps.queues.prev?.() ?? null,
+  })
+  await deps.queues.write(view)
 }
 
 // ---- Briefs

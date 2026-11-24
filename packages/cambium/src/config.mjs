@@ -57,7 +57,7 @@ import { join, resolve } from 'node:path'
  *   retriage: { enabled: boolean, time: string, maxSkipDays: number },
  *   intake: { adopt: boolean, ignoreLabels: string[] },
  *   rescue: RescueConfig,
- *   paths: { home: string, db: string, heartbeat: string, logs: string },
+ *   paths: { home: string, db: string, heartbeat: string, queues: string, logs: string },
  *   logs: { keepPerIssue: number, daemonMaxBytes: number },
  *   graft: { command: string, app: string | null, botLogin: string | null },
  *   worker: { command: string, args: string[], graftApp: string | null, fetch: boolean, env: Record<string, string> },
@@ -128,6 +128,7 @@ export function defaults(home = DEFAULT_HOME) {
       home,
       db: join(home, 'cambium.db'),
       heartbeat: join(home, 'state.json'),
+      queues: join(home, 'queues.json'),
       logs: join(home, 'logs'),
     },
     logs: { keepPerIssue: 20, daemonMaxBytes: 10 * 1024 * 1024 },
@@ -215,7 +216,8 @@ export function resolveConfig(raw = {}) {
   const home = untilde(raw?.paths?.home ?? DEFAULT_HOME)
   /** @type {Config} */
   const config = merge(defaults(home), raw)
-  for (const k of /** @type {const} */ (['home', 'db', 'heartbeat', 'logs'])) config.paths[k] = untilde(config.paths[k])
+  for (const k of /** @type {const} */ (['home', 'db', 'heartbeat', 'queues', 'logs']))
+    config.paths[k] = untilde(config.paths[k])
   if (!/^\d{2}:\d{2}$/.test(config.release.time)) throw new Error(`config: release.time must be HH:MM`)
   if (!/^\d{2}:\d{2}$/.test(config.retriage.time)) throw new Error(`config: retriage.time must be HH:MM`)
   if (typeof config.retriage.maxSkipDays !== 'number' || !(config.retriage.maxSkipDays >= 0))

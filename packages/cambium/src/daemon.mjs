@@ -6,6 +6,7 @@ import { applyReload } from './config.mjs'
 import { gcRunner } from './gc.mjs'
 import { graftGitHub } from './github.mjs'
 import { openStore } from './store.mjs'
+import { QUEUES_VERSION, writeQueues } from './queue-view.mjs'
 import { tick } from './tick.mjs'
 import { autoUpdate, realUpdater } from './update.mjs'
 import { processSpawner, realProcs } from './workers.mjs'
@@ -94,6 +95,9 @@ export function realDeps(config, { echo } = {}) {
     echo,
   })
   const spawner = processSpawner({ config })
+  /** @type {import('./queue-view.mjs').QueuesFile | null} */
+  let lastQueues = /** @type {any} */ (readHeartbeat(config.paths.queues))
+  if (lastQueues?.version !== QUEUES_VERSION) lastQueues = null
   return {
     config,
     clock: { now: Date.now },
@@ -106,6 +110,13 @@ export function realDeps(config, { echo } = {}) {
     log,
     events,
     heartbeat: (state) => writeHeartbeat(config.paths.heartbeat, state),
+    queues: {
+      prev: () => lastQueues,
+      write: (view) => {
+        writeQueues(config.paths.queues, view)
+        lastQueues = view
+      },
+    },
     daemonStartedAt: Date.now(),
     pid: process.pid,
     updater: realUpdater(),
