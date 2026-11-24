@@ -5,7 +5,10 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, readdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { END } from '../src/graph/index.mjs'
 import { normalize } from '../src/github.mjs'
+import { markerAt, renderDecideMarker } from '../src/graphs/decide.mjs'
+import { newMarker, renderMarker } from '../src/marker.mjs'
 import { boardOf, QUEUES_VERSION, queueView, writeQueues } from '../src/queue-view.mjs'
 import { tick } from '../src/tick.mjs'
 import { harness, SLUG } from './fakes.mjs'
@@ -225,4 +228,85 @@ test('writeQueues: atomic, leaves no temp file', () => {
   writeQueues(path, { ...v, tickSeconds: 60 })
   assert.deepEqual(readdirSync(join(dir, 'nested')), ['queues.json'])
   assert.equal(JSON.parse(readFileSync(path, 'utf8')).tickSeconds, 60)
+})
+
+test('boardOf: an ask:decide item carries its decide summary from the marker; no marker reads as not started', () => {
+  const seed = {
+    issue: { repo: SLUG, number: 7, question: 'Which?', options: [] },
+    lens: /** @type {const} */ ('technical'),
+    channel: 'github',
+  }
+  const T = Date.parse('2026-11-20T00:00:00Z')
+  const leased = markerAt(
+    {
+      node: 'await-answers',
+      input: {
+        ...seed,
+        lease: { holder: 'james', at: 'x', activeAt: 'x', idleMs: 1 },
+        rounds: [
+          { n: 1, questions: [{ id: 'q1', title: 'T', text: 'Q', rec: 'yes' }], answers: [] },
+          { n: 2, questions: [{ id: 'q2', title: 'T', text: 'Q', rec: 'yes' }], answers: [] },
+        ],
+      },
+    },
+    { now: () => T },
+  )
+  const paused = markerAt({ node: 'paused', input: { ...seed, paused: 'confirm' } }, { now: () => T })
+  const done = markerAt({ node: END, input: { ...seed, answerUrl: 'https://x/a' } }, { now: () => T })
+  const node = (/** @type {number} */ number, /** @type {string[]} */ labels, /** @type {string[]} */ bodies) => ({
+    number,
+    title: `I${number}`,
+    url: `u/${number}`,
+    state: 'OPEN',
+    labels: { nodes: labels.map((name) => ({ name })) },
+    comments: { nodes: bodies.map((body, k) => ({ databaseId: number * 10 + k, body, author: { login: 'cambium' } })) },
+  })
+  const ask = { ...newMarker(), ask: { kind: 'decide', question: 'Q', interactive: true, lens: 'product' } }
+  const snap = normalize(
+    {
+      repository: {
+        issues: {
+          nodes: [
+            node(1, ['q:human', 'ask:decide', 'ask:session'], [renderMarker(/** @type {any} */ (ask))]),
+            node(2, ['q:human', 'ask:decide', 'ask:session'], [renderDecideMarker(leased)]),
+            node(3, ['q:human', 'ask:decide'], [renderDecideMarker(done)]),
+            node(4, ['q:human', 'why:budget'], []),
+            node(5, ['q:human', 'ask:decide', 'ask:session'], [renderDecideMarker(paused)]),
+          ],
+        },
+      },
+    },
+    { botLogin: 'cambium' },
+  )
+  const human = boardOf(SLUG, snap).columns.human
+  const by = Object.fromEntries(human.map((i) => [i.number, i.decide]))
+  assert.deepEqual(by[1], {
+    status: 'none',
+    node: null,
+    round: 0,
+    holder: null,
+    outcome: null,
+    answerUrl: null,
+    lens: 'product',
+    at: null,
+    error: null,
+  })
+  assert.deepEqual(by[2], {
+    status: 'leased',
+    node: 'await-answers',
+    round: 2,
+    holder: 'james',
+    outcome: null,
+    answerUrl: null,
+    lens: 'technical',
+    at: new Date(T).toISOString(),
+    error: null,
+  })
+  assert.equal(by[3]?.status, 'done')
+  assert.equal(by[3]?.outcome, 'answered')
+  assert.equal(by[3]?.answerUrl, 'https://x/a')
+  assert.equal(by[3]?.node, null)
+  assert.deepEqual([by[5]?.status, by[5]?.node], ['paused', 'confirm'], 'paused: the wait it left')
+  assert.equal(by[4], undefined, 'no ask:decide and no marker: no decide field')
+  assert.equal('decide' in human.find((i) => i.number === 4), false)
 })

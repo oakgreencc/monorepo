@@ -54,6 +54,21 @@ export function briefOf({ dir, paths, exists = existsSync }, { repo, number }) {
   return { path, command: cwd ? `cd ${shellWord(cwd)} && ${run}` : run }
 }
 
+/**
+ * The command that starts or resumes a decision in claude (the plugin's `/oakgreen:decide`), in the repo's checkout
+ * when cambium's config says where it is.
+ *
+ * @param {Record<string, string>} paths @param {{ repo: string, number: number }} item
+ */
+export function decideCommandOf(paths, { repo, number }) {
+  const run = `claude "/oakgreen:decide ${repo}#${number}"`
+  const cwd = paths[repo]
+  return cwd ? `cd ${shellWord(cwd)} && ${run}` : run
+}
+
+/** A decision item: `ask:decide`, or a `decide` summary from cambium's queue view. @param {import('./queues.mjs').Item} i */
+const isDecide = (i) => i.labels.includes('ask:decide') || !!i.decide
+
 /** What mycelium filed is worked out again once this old, as the Graphs flow is. */
 const ACTIVITY_FRESH_MS = 15_000
 /** @type {WeakMap<import('./traces.mjs').TraceFile, { at: number, activity: ReturnType<typeof intakeActivity> }>} */
@@ -109,12 +124,13 @@ export async function buildState({
       }
   const github = withCosts(read, heartbeat.data)
   // Copies: the queue answer is cached and shared between requests.
-  const human = briefs
-    ? github.columns.human.map((i) => {
-        const brief = briefOf(briefs, i)
-        return brief ? { ...i, brief } : i
-      })
-    : github.columns.human
+  const human = github.columns.human.map((i) => {
+    const brief = briefs ? briefOf(briefs, i) : null
+    const decideCommand = isDecide(i) ? decideCommandOf(briefs?.paths ?? {}, i) : null
+    return brief || decideCommand
+      ? { ...i, ...(brief ? { brief } : {}), ...(decideCommand ? { decideCommand } : {}) }
+      : i
+  })
   return {
     now: new Date(now()).toISOString(),
     pollMs: POLL_MS,

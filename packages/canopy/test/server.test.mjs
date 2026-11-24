@@ -9,7 +9,7 @@ import { main } from '../src/cli.mjs'
 import { resolveSettings } from '../src/config.mjs'
 import { cachedIssues, cachedQueues } from '../src/github.mjs'
 import { emptyColumns, group } from '../src/queues.mjs'
-import { briefOf, buildState, createApp, hostnameOf, shellWord } from '../src/server.mjs'
+import { briefOf, buildState, createApp, decideCommandOf, hostnameOf, shellWord } from '../src/server.mjs'
 import { graphqlAnswer, heartbeat, T0 } from './fixtures.mjs'
 
 const REPO = 'oakgreencc/monorepo'
@@ -257,4 +257,43 @@ test('the health tab renders each repo: watched workflows, budget and a paused r
   assert.match(PAGE, /body\.push\(summary\(d\), repos\(d, now\)/)
   assert.match(PAGE, /const WATCH = \{ green: \['ok', 'green'\], red: \['err', 'red'\], unknown: \['', 'unknown'\] \}/)
   assert.match(PAGE, /if \(r\.pausedUntil\) out\.push\(h\('div', \{ class: 'banner' \}/)
+})
+
+test('decide items: an ask:decide q:human item carries the /oakgreen:decide command; any other does not', async () => {
+  const item = (/** @type {number} */ number, /** @type {string[]} */ labels, extra = {}) => ({
+    repo: REPO,
+    number,
+    title: `#${number}`,
+    url: '',
+    createdAt: null,
+    updatedAt: null,
+    labels: ['q:human', ...labels],
+    why: null,
+    priority: null,
+    ...extra,
+  })
+  const answer = {
+    repos: [],
+    columns: { ...emptyColumns(), human: [item(4, ['ask:decide', 'ask:session']), item(5, ['why:triage'])] },
+    prs: [],
+    stranded: [],
+    fetchedAt: null,
+    cached: false,
+  }
+  const queues = { get: async () => answer }
+  const briefs = { dir: join(tmpdir(), 'canopy-no-briefs'), paths: { [REPO]: '/src/my repo' } }
+  const s = await buildState({ statePath: stateFile(heartbeat()), repos: [REPO], queues, now: () => T0, briefs })
+  const [decide, other] = s.github.columns.human
+  assert.equal(decide.decideCommand, `cd '/src/my repo' && claude "/oakgreen:decide ${REPO}#4"`)
+  assert.equal('decideCommand' in other, false, 'an item with no decision gets no command')
+  assert.equal('brief' in other, false)
+  assert.equal(decideCommandOf({}, { repo: REPO, number: 4 }), `claude "/oakgreen:decide ${REPO}#4"`)
+  const noBriefs = await buildState({ statePath: stateFile(heartbeat()), repos: [REPO], queues, now: () => T0 })
+  assert.equal(noBriefs.github.columns.human[0].decideCommand, `claude "/oakgreen:decide ${REPO}#4"`)
+})
+
+test('the page renders the decide part only from an item with a decide command', async () => {
+  const { PAGE } = await import('../src/page.mjs')
+  assert.match(PAGE, /if \(sel && sel\.decideCommand\) parts\.push\(decidePart\(sel, h, link\)\)/)
+  assert.match(PAGE, /function decidePart\(/)
 })

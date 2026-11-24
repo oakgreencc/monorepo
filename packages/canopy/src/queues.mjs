@@ -68,8 +68,12 @@ export const queryVars = (/** @type {string} */ slug) => {
 /**
  * @typedef {{ repo: string, number: number, title: string, url: string, createdAt: string | null,
  *   updatedAt: string | null, labels: string[], why: string | null, priority: string | null, wait?: Wait | null,
- *   brief?: { path: string, command: string } }} Item
+ *   brief?: { path: string, command: string }, decide?: import('./decide.mjs').DecideSummary,
+ *   decideCommand?: string }} Item
  *   `brief`: added by the server (server.mjs `briefOf`) to a `q:human` item cambium wrote a session brief for.
+ *   `decide`: how far a decision has got, from cambium's queue view (cambium queue-view.mjs `decideOf`): on an
+ *   `ask:decide` item or one with a `cambium:decide` marker; GitHub's answer never carries it.
+ *   `decideCommand`: added by the server (server.mjs `decideCommandOf`) to a `q:human` decision item.
  * @typedef {{ kind: 'deferred' | 'blocked', reason: string | null, until: string | null,
  *   blockers: { number: number, title: string, url: string }[] }} Wait
  *   Why a `waiting` issue is parked: cambium's defer reason and recheck time (`until`, deferred only) from its state

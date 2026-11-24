@@ -16,7 +16,8 @@
 
 /**
  * `q:human` items, stranded issues and session candidates as one list, each with its filter tags. Facets: `kind`,
- * `flag` (`flag:cost` on any item over the cost threshold), `why`, `priority`, `repo`, and `label` for any other
+ * `flag` (`flag:cost` on any item over the cost threshold), `why`, `lens` (a decision's `product` or `technical`, from
+ * cambium's queue view), `priority`, `repo`, and `label` for any other
  * label cambium's vocabulary doesn't already cover.
  *
  * @param {{ columns: { human: import('./queues.mjs').Item[] }, stranded?: import('./queues.mjs').Stranded[],
@@ -29,6 +30,7 @@ export function inboxItems(gh) {
     `kind:${kind}`,
     ...(i.cost?.flagged ? ['flag:cost'] : []),
     ...(i.why ? [`why:${i.why}`] : []),
+    ...(i.decide?.lens ? [`lens:${i.decide.lens}`] : []),
     ...(i.priority ? [`priority:${i.priority}`] : []),
     `repo:${i.repo}`,
     ...i.labels.filter((/** @type {string} */ l) => !own.test(l)).map((/** @type {string} */ l) => `label:${l}`),
@@ -118,7 +120,7 @@ export function priorityRank(/** @type {string | null | undefined} */ p) {
  * @returns {Facet[]}
  */
 export function facetsOf(items, selected) {
-  const order = ['kind', 'flag', 'why', 'priority', 'repo', 'label']
+  const order = ['kind', 'flag', 'why', 'lens', 'priority', 'repo', 'label']
   /** @type {Map<string, number>} */
   const counts = new Map()
   for (const it of items) for (const t of it.tags) counts.set(t, (counts.get(t) || 0) + 1)
