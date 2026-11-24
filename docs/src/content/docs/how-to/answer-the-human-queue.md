@@ -30,13 +30,13 @@ For a `why:budget` item, cambium writes a session brief: the issue, what each at
 2. Paste it into a terminal. claude starts in the repository with the brief as its first message.
 3. Once the fix is published, move the issue out of `q:human`. The brief is deleted on the next tick.
 
-A decision worth a session (labels `ask:decide` and `ask:session`) gets a brief too, which starts with `/oakgreen:decide`. Other `q:human` items get no brief and no command.
+A decision worth a session (labels `ask:decide` and `ask:session`) gets a brief too, which starts with `/oakgreen:decide`. Other `q:human` items get no brief.
 
 ## Decide in a session
 
 For an `ask:decide` + `ask:session` item. You need the oakgreen plugin in Claude Code (`claude plugin install oakgreen@oakgreencc`).
 
-1. Start claude in the repository with the brief (above), or run `/oakgreen:decide owner/repo#42` in any session there.
+1. In canopy's reading pane, under **Decision**, select **Copy** and paste the command into a terminal: `cd ~/src/repo && claude "/oakgreen:decide owner/repo#42"`. Or start claude with the brief (above), or run `/oakgreen:decide owner/repo#42` in any session there. **Decision** also says how far it has got: not started, live (the step, the round of questions and who holds it), paused, or committed with a link to the answer.
 2. Claude gathers the facts first, each with its source. For a visual choice it also draws a static HTML mock of each option; the round links them, so open them in a browser.
 3. Answer the round: up to five numbered questions, each with a recommendation. Reply `yes` to take every recommendation, or answer by number (`2: later`). Reply `stop` to abandon.
 4. More rounds follow until nothing is open. Claude then shows a draft: the choice, what is in and out of scope, acceptance checks and follow-up issues.

@@ -288,7 +288,21 @@ Every tick, after the other steps and before the heartbeat (paused too; nothing 
 }
 ```
 
-Items and PRs have canopy's shapes (canopy's README, `/api/state`).
+Items and PRs have canopy's shapes (canopy's README, `/api/state`). An item labelled `ask:decide`, or with a `cambium:decide` marker, also has `decide`, how far the decision has got (`decideOf`):
+
+```jsonc
+"decide": {
+  "status": "leased", // none (no marker yet) | leased (live) | paused | done
+  "node": "await-answers", // where it stands; paused: the wait it left; null once done
+  "round": 2, // rounds of questions asked so far
+  "holder": "james", // who holds the lease, or null
+  "outcome": null, // once done: answered | abandoned
+  "answerUrl": null, // the posted answer, once there is one
+  "lens": "technical", // product | technical: the marker's, else the ask's, else null
+  "at": "2026-11-16T12:00:00.000Z", // when the marker was last written
+  "error": null // the node error the last turn stopped on
+}
+```
 
 ## Heartbeat (`state.json`)
 

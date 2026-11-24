@@ -16,10 +16,17 @@ export const QUEUES_VERSION = 1
  * @typedef {'intake' | 'waiting' | 'task' | 'running' | 'human' | 'promote'} Column
  * @typedef {{
  *   repo: string, number: number, title: string, url: string, createdAt: string | null, updatedAt: string | null,
- *   labels: string[], why: string | null, priority: string | null, wait?: Wait,
+ *   labels: string[], why: string | null, priority: string | null, wait?: Wait, decide?: DecideSummary,
  * }} Item
+ *   `decide`: on an `ask:decide` issue, or one with a `cambium:decide` marker; absent on any other.
  * @typedef {{ kind: 'deferred' | 'blocked', reason: string | null, until: string | null,
  *   blockers: { number: number, title: string, url: string }[] }} Wait
+ * @typedef {{ status: 'none' | 'leased' | 'paused' | 'done', node: string | null, round: number,
+ *   holder: string | null, outcome: 'answered' | 'abandoned' | null, answerUrl: string | null,
+ *   lens: 'product' | 'technical' | null, at: string | null, error: string | null }} DecideSummary
+ *   How far a decision has got, from its `cambium:decide` marker (graphs/decide.mjs, read with `parseDecideMarker` by
+ *   the snapshot). `status: 'none'`: no marker yet, not started. `node`: where it stands (paused: the wait it left), null once done. `round`: rounds of questions asked so far.
+ *   `holder`: who holds the lease. `lens`: the marker's, else the ask's in the state comment, else null.
  * @typedef {{
  *   slug: string, ok: boolean, error: string | null, fetchedAt: string | null,
  *   columns: Record<Column, Item[]>, prs: any[], stranded: any[],
@@ -56,6 +63,40 @@ export function tallyOf(rows) {
   return t
 }
 
+/**
+ * The decide summary of an issue, or null when it is no decision (no `ask:decide` label and no marker).
+ * @param {Issue} i @returns {DecideSummary | null}
+ */
+export function decideOf(i) {
+  const m = i.decideComment?.marker ?? null
+  if (!m && !i.labels.includes('ask:decide')) return null
+  if (!m) {
+    const lens = /** @type {any} */ (i.stateComment?.marker)?.ask?.lens
+    return {
+      status: 'none',
+      node: null,
+      round: 0,
+      holder: null,
+      outcome: null,
+      answerUrl: null,
+      lens: lens === 'product' || lens === 'technical' ? lens : null,
+      at: null,
+      error: null,
+    }
+  }
+  return {
+    status: m.status,
+    node: m.status === 'done' ? null : m.status === 'paused' ? (m.input.paused ?? m.node) : m.node,
+    round: m.input.rounds.length,
+    holder: m.input.lease?.holder ?? null,
+    outcome: m.outcome ?? null,
+    answerUrl: m.input.answerUrl ?? null,
+    lens: m.input.lens,
+    at: m.at ?? null,
+    error: m.error ?? null,
+  }
+}
+
 const labelValue = (/** @type {string[]} */ labels, /** @type {string} */ prefix) =>
   labels.find((l) => l.startsWith(prefix))?.slice(prefix.length) ?? null
 
@@ -72,6 +113,8 @@ function itemOf(repo, i, col) {
     why: labelValue(i.labels, 'why:'),
     priority: labelValue(i.labels, 'priority:'),
   })
+  const decide = decideOf(i)
+  if (decide) item.decide = decide
   if (col !== 'waiting') return item
   const marker = /** @type {any} */ (i.stateComment?.marker ?? null)
   const kind = i.labels.includes(WAIT.blocked) ? 'blocked' : 'deferred'

@@ -1,4 +1,5 @@
 // @ts-check
+import { decidePart, decideStatus } from './decide.mjs'
 import { facetsOf, groupOf, inboxGroups, inboxItems, inboxStats, priorityRank, viewOf } from './inbox.mjs'
 import { autoApproved, flameFrames, flameTree } from './flame.mjs'
 import { markdown } from './markdown.mjs'
@@ -410,7 +411,7 @@ background:var(--raised);transform:translateX(-104%);visibility:hidden;transitio
 `
 
 const JS = `
-${[inboxItems, priorityRank, groupOf, inboxGroups, facetsOf, viewOf, inboxStats, markdown, autoApproved, flameTree, flameFrames, layoutGraph].map(String).join('\n')}
+${[inboxItems, decideStatus, decidePart, priorityRank, groupOf, inboxGroups, facetsOf, viewOf, inboxStats, markdown, autoApproved, flameTree, flameFrames, layoutGraph].map(String).join('\n')}
 const $ = (id) => document.getElementById(id)
 const RING = '${RING}'
 function h(tag, attrs, ...kids) {
@@ -659,7 +660,9 @@ const PRIO = { critical: 'prio-critical', high: 'prio-high' }
 const prio = (p) => (p ? h('span', { class: PRIO[p] || null }, 'priority:' + p) : null)
 const whyOf = (it) => (it.kind === 'stranded' ? h('span', { class: 'why' }, 'PR closed') : it.kind === 'cost' ? h('span', { class: 'why' }, 'session candidate') : it.why ? h('span', { class: 'why' }, 'why:' + it.why) : h('span', { class: 'faint' }, 'no why: label'))
 const tagText = (t) => (t.id === 'kind:human' ? 'q:human' : t.id === 'kind:stranded' ? 'stranded' : t.id === 'kind:cost' ? 'session candidate' : t.id === 'flag:cost' ? 'over budget' : t.id.startsWith('label:') || t.id.startsWith('repo:') ? t.value : t.id)
-const FACET_NAME = { kind: 'Kind', flag: 'Flag', why: 'Reason', priority: 'Priority', repo: 'Repo', label: 'Label' }
+// A decision's lens (product | technical), shown next to its why:.
+const lensOf = (it) => (it.decide && it.decide.lens ? h('span', { class: 'muted', title: 'What kind of decision: the lens /oakgreen:decide frames it with' }, 'lens:' + it.decide.lens) : null)
+const FACET_NAME = { kind: 'Kind', flag: 'Flag', why: 'Reason', lens: 'Lens', priority: 'Priority', repo: 'Repo', label: 'Label' }
 const TAG_TITLE = { 'kind:human': 'In the Human Queue (q:human)', 'kind:stranded': 'Agent PR closed unmerged; no queue label',
   'kind:cost': "Here only because its task spend is over cambium's costFlagUsd with no merged PR", 'flag:cost': "Task spend over cambium's costFlagUsd with no merged PR" }
 
@@ -710,7 +713,7 @@ function inboxSplit(gh, multi, now) {
   const row = (it) => h('li', { class: 'row', role: 'option', 'data-key': it.key, 'data-fk': 'row:' + it.key,
       'aria-selected': String(it.key === ibSel), tabindex: it.key === focusable ? 0 : -1 },
     h('span', { class: 'row-t', title: it.title }, h('span', { class: 'faint' }, '#' + it.number + ' '), it.title),
-    h('span', { class: 'meta' }, whyOf(it), prio(it.priority), costChip(it.cost), multi ? h('span', {}, it.repo.split('/')[1]) : null,
+    h('span', { class: 'meta' }, whyOf(it), lensOf(it), prio(it.priority), costChip(it.cost), multi ? h('span', {}, it.repo.split('/')[1]) : null,
       h('span', { class: 'faint age', title: it.at || '' }, ago(it.at, now))))
   const rows = groups.flatMap((g) => [
     h('li', { class: 'ib-group', role: 'presentation', title: g.hint }, h('span', {}, g.label), h('span', { class: 'n' }, g.items.length)),
@@ -784,7 +787,7 @@ function issuePane(sel, gone, d, multi, now, sig) {
     h('button', { class: 'linkish back', type: 'button', 'data-back': '', 'data-fk': 'back' }, 'Back to the inbox'),
     h('h2', { class: 'pane-title', id: 'pane-title' }, h('span', { class: 'faint' }, '#' + base.number + ' '), base.title),
     h('div', { class: 'meta' },
-      sel ? whyOf(sel) : h('span', { class: 'why' }, 'left the inbox'), prio(sel ? sel.priority : null), costChip(sel && sel.cost),
+      sel ? whyOf(sel) : h('span', { class: 'why' }, 'left the inbox'), sel ? lensOf(sel) : null, prio(sel ? sel.priority : null), costChip(sel && sel.cost),
       multi ? h('span', {}, repo) : null,
       data && data.author ? h('span', {}, 'opened by ', h('b', {}, data.author), ' ', h('span', { class: 'faint', title: data.createdAt || '' }, ago(data.createdAt, now))) : null,
       sel ? h('span', { class: 'faint', title: sel.at || '' }, (sel.kind === 'stranded' ? 'PR closed ' : 'updated ') + ago(sel.at, now)) : null),
@@ -795,6 +798,8 @@ function issuePane(sel, gone, d, multi, now, sig) {
 
   const parts = []
   if (gone) parts.push(h('div', { class: 'banner warn part' }, h('b', {}, 'No longer in the inbox. '), "It has left q:human (or is no longer stranded). Showing it as last read; it won't refresh here."))
+  // A decision (ask:decide): the /oakgreen:decide command and how far it has got (decide.mjs). Above any brief.
+  if (sel && sel.decideCommand) parts.push(decidePart(sel, h, link))
   if (sel && sel.brief) parts.push(sessionPart(sel.brief))
   if (sel && sel.cost && sel.cost.flagged) parts.push(h('div', { class: 'banner warn part' }, h('b', {}, 'Session candidate: '),
     'task workers have spent ' + usd(sel.cost.task) + ' on this issue' + (costFlagUsd != null ? ', over the ' + usd(costFlagUsd) + ' threshold,' : '') + ' with no merged PR. More attempts may not get it there; consider working it in a session.'))
