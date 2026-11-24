@@ -14,15 +14,24 @@ const renderBack = (m) => `<!-- cambium:state ${JSON.stringify(m)} -->`
 /**
  * The graph engine with a develop → main repo; `release.enabled` as given. The read adds the comparison:
  * `state.merged` are the PRs on develop not yet in main.
- * @param {{ enabled?: boolean, aheadBy?: number | null, merged?: number[], from?: string }} [seed]
+ * `signal`: `release.signal`. `compareRange` says a run's sha contains a merge commit when `state.contains` lists
+ * that `merge…run` pair.
+ * @param {{ enabled?: boolean, aheadBy?: number | null, merged?: number[], from?: string, signal?: any }} [seed]
  */
-function promoHarness({ enabled = false, aheadBy = 1, merged = [110], from = 'develop' } = {}) {
+function promoHarness({ enabled = false, aheadBy = 1, merged = [110], from = 'develop', signal = undefined } = {}) {
   const h = harness({
     issues: [{ number: 11, labels: [] }],
     config: {
       engine: 'graph',
       phases: { task: { cap: 0 } },
-      repos: [{ slug: SLUG, path: '/repo', baseBranch: from, release: { enabled, time: '00:00', from, to: 'main' } }],
+      repos: [
+        {
+          slug: SLUG,
+          path: '/repo',
+          baseBranch: from,
+          release: { enabled, time: '00:00', from, to: 'main', ...(signal === undefined ? {} : { signal }) },
+        },
+      ],
     },
   })
   h.gh.issue(11).comment = {
@@ -30,10 +39,15 @@ function promoHarness({ enabled = false, aheadBy = 1, merged = [110], from = 'de
     body: renderBack({ v: 1, phase: 'task', stage: 'submitted', queued: true, attempt: 1, pr: 110, history: [] }),
   }
   h.gh.addPr({ number: 110, closes: [11], state: 'MERGED', branch: 'agent/11-x' })
-  const state = { aheadBy, merged }
+  const state = { aheadBy, merged, contains: /** @type {string[]} */ ([]) }
   const base = h.gh.github
   h.deps.github = {
     ...base,
+    async compareRange(slug, b, head) {
+      h.gh.calls.push({ op: 'compareRange', args: [slug, b, head] })
+      const status = b === head ? 'identical' : state.contains.includes(`${b}...${head}`) ? 'ahead' : 'diverged'
+      return { status, aheadBy: 0, behindBy: 0, files: 0, commits: [] }
+    },
     async read(slug) {
       const snap = await base.read(slug)
       if (from === 'main') return snap
@@ -317,4 +331,107 @@ test('kept release answer: writes keep it honest; readEveryMinutes 0 and { fresh
     () => resolveConfig({ repos: [{ slug: 'o/r', path: '/r', release: { readEveryMinutes: -1 } }] }),
     /readEveryMinutes/,
   )
+})
+
+/** @param {number} id @param {string} conclusion @param {string} sha */
+const run = (id, conclusion, sha) => ({ id, url: `https://run/${id}`, sha, conclusion, at: '2026-01-01T00:00:00Z' })
+
+/** A workflow-signal repo whose PR 110 (merge commit `merge-110`) has just left `from`'s lead. */
+async function deployHarness() {
+  const h = promoHarness({ signal: { workflow: 'cd.yml' } })
+  await tick(h.deps)
+  assert.deepEqual(h.gh.issue(11).labels, ['q:promote'])
+  h.state.merged = []
+  h.state.aheadBy = 0
+  return h
+}
+
+test('config: release.signal defaults to "merged", takes { workflow }, refuses other shapes', () => {
+  const repo = (/** @type {any} */ release) => ({
+    repos: [{ slug: 'o/r', path: '/r', baseBranch: 'develop', release }],
+  })
+  assert.equal(resolveConfig(repo({})).repos[0].release.signal, 'merged')
+  assert.equal(resolveConfig(repo({ signal: 'merged' })).repos[0].release.signal, 'merged')
+  assert.deepEqual(resolveConfig(repo({ signal: { workflow: 'cd.yml' } })).repos[0].release.signal, {
+    workflow: 'cd.yml',
+  })
+  for (const signal of ['deployed', { workflow: '' }, { workflow: 'cd.yml', branch: 'main' }, ['cd.yml'], null, 3])
+    assert.throws(() => resolveConfig(repo({ signal })), /release\.signal must be/, JSON.stringify(signal))
+})
+
+test('workflow signal: in `to` but no run yet keeps q:promote', async () => {
+  const h = await deployHarness()
+  await tick(h.deps)
+  assert.deepEqual(h.gh.issue(11).labels, ['q:promote'])
+  assert.ok(h.gh.calls.some((c) => c.op === 'workflowRuns' && c.args[1] === 'cd.yml' && c.args[2] === 'main'))
+})
+
+test('workflow signal: a failed newest run keeps q:promote, even over an older success that contains the PR', async () => {
+  const h = await deployHarness()
+  h.state.contains = ['merge-110...t2', 'merge-110...t3']
+  h.gh.runs.set('cd.yml@main', [run(3, 'failure', 't3'), run(2, 'success', 't2')])
+  await tick(h.deps)
+  assert.deepEqual(h.gh.issue(11).labels, ['q:promote'])
+})
+
+test('workflow signal: a green run on a commit without the PR keeps q:promote', async () => {
+  const h = await deployHarness()
+  h.gh.runs.set('cd.yml@main', [run(1, 'success', 't1')])
+  await tick(h.deps)
+  assert.deepEqual(h.gh.issue(11).labels, ['q:promote'])
+  assert.ok(h.gh.calls.some((c) => c.op === 'compareRange' && c.args[1] === 'merge-110' && c.args[2] === 't1'))
+})
+
+test('workflow signal: the newest run green on a commit containing the PR takes q:promote off', async () => {
+  const h = await deployHarness()
+  h.state.contains = ['merge-110...t2']
+  h.gh.runs.set('cd.yml@main', [run(5, 'cancelled', 't3'), run(2, 'success', 't2'), run(1, 'failure', 't1')])
+  await tick(h.deps)
+  assert.equal(h.gh.issue(11).state, 'CLOSED')
+  assert.deepEqual(h.gh.issue(11).labels, [])
+  assert.ok(h.events.some((e) => e.issue === 11 && e.msg === 'promoted to `main`; `cd.yml` succeeded'))
+  // The merge commit was read once and kept.
+  assert.equal(h.gh.calls.filter((c) => c.op === 'mergeCommit').length, 1)
+})
+
+test('workflow signal: a run read that fails keeps q:promote and logs', async () => {
+  const h = await deployHarness()
+  h.state.contains = ['merge-110...t2']
+  h.gh.runs.set('cd.yml@main', [run(2, 'success', 't2')])
+  h.gh.faults.runsError = new Error('boom')
+  await tick(h.deps)
+  assert.deepEqual(h.gh.issue(11).labels, ['q:promote'])
+  assert.ok(h.events.some((e) => e.level === 'error' && /promotion signal `cd.yml` on `main`: boom/.test(e.msg)))
+  h.gh.faults.runsError = null
+  await tick(h.deps)
+  assert.deepEqual(h.gh.issue(11).labels, [])
+})
+
+test('workflow signal: still ahead of `to` keeps q:promote whatever the runs say', async () => {
+  const h = promoHarness({ signal: { workflow: 'cd.yml' } })
+  h.state.contains = ['merge-110...t2']
+  h.gh.runs.set('cd.yml@main', [run(2, 'success', 't2')])
+  await tick(h.deps)
+  await tick(h.deps)
+  assert.deepEqual(h.gh.issue(11).labels, ['q:promote'])
+  assert.ok(!h.gh.calls.some((c) => c.op === 'workflowRuns'))
+})
+
+test('mergeCommit reads the PR: its merge commit once merged, else null', async () => {
+  const config = resolveConfig({ repos: [{ slug: 'o/r', path: '/r' }] })
+  /** @type {any} */
+  let answer = { merged_at: '2026-01-01T00:00:00Z', merge_commit_sha: 'abc' }
+  /** @type {string[][]} */
+  const argv = []
+  const gh = graftGitHub({
+    config,
+    exec: async (_cmd, args) => {
+      argv.push(args)
+      return JSON.stringify(answer)
+    },
+  })
+  assert.equal(await gh.mergeCommit('o/r', 7), 'abc')
+  assert.deepEqual(argv[0].slice(0, 3), ['api', 'GET', '/repos/o/r/pulls/7'])
+  answer = { merged_at: null, merge_commit_sha: 'test-merge' }
+  assert.equal(await gh.mergeCommit('o/r', 7), null)
 })

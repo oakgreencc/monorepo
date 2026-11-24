@@ -199,6 +199,11 @@ export function fakeGitHub({ issues = [], prs = [] } = {}) {
       if (faults.rulesError) throw faults.rulesError
       return rules.get(base) ?? { requiredChecks: [], approvals: 0, codeOwners: false, rulesets: [] }
     },
+    async mergeCommit(slug, number) {
+      calls.push({ op: 'mergeCommit', args: [slug, number] })
+      const p = pulls.find((x) => x.number === number)
+      return p?.state === 'MERGED' ? `merge-${number}` : null
+    },
     async behindBase(slug, number) {
       calls.push({ op: 'behindBase', args: [slug, number] })
       const p = /** @type {any} */ (pulls.find((x) => x.number === number))

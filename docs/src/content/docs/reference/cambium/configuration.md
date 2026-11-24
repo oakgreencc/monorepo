@@ -15,6 +15,7 @@ One JSON file: `--config`, else `$CAMBIUM_CONFIG`, else `~/.cambium/config.json`
   "engine": "legacy",
   "tickSeconds": 30,
   "stepTimeoutSeconds": 20,
+  "fullReadEvery": 4,
   "repos": [{ "slug": "oakgreencc/monorepo", "path": "~/OGCC/monorepo", "baseBranch": "main" }],
   "phases": {
     "task": { "cap": 2, "wallClockMinutes": 60, "maxTurns": 200, "maxAttempts": 3, "maxReworks": 3 },
@@ -79,6 +80,7 @@ A file that does not load, or has no `repos`, keeps the running config and logs 
 | `engine`             | `"legacy"` | `"legacy"` (stage tick) or `"graph"`. Dispatch, release graphs, rescue, upkeep, red base and tracing need `"graph"`. |
 | `tickSeconds`        | `30`       | Interval between ticks.                                                                                   |
 | `stepTimeoutSeconds` | `20`       | Bound on each tick step; a step over it is logged and the tick moves on.                                  |
+| `fullReadEvery`      | `4`        | Ticks. A repo whose cheap probe shows no change reuses its last snapshot; every `fullReadEvery`th tick reads it in full anyway, since check results change no timestamp the probe sees. `1` reads in full every tick, without the probe. See [one tick](/explanation/architecture/#one-tick). |
 | `mergeQueueMinutes`  | `120`      | A submitted PR not merged after this long goes to `q:human` (`why:approve`).                              |
 | `mergeStallMinutes`  | `20`       | A PR with auto-merge armed and green checks that GitHub still reports `BLOCKED` this long after arming is [stalled](/reference/cambium/graphs/#stalled-merges). An agent PR goes to `q:human` (`why:approve`); any other PR gets one `warn` event and a heartbeat entry. The reason names the blocker where GitHub exposes it: a missing required check, a code-owner review, approvals short of the count required, the rulesets on the base. `0` turns both off. |
 | `watchEveryMinutes`  | `5`        | How often each repo's [`watch`](#reposwatch) workflows are read. `0` turns watching off. |
@@ -106,7 +108,14 @@ A file that does not load, or has no `repos`, keeps the running config and logs 
 | `phases`        | `{}`               | Per-repo overrides of `wallClockMinutes` and `maxTurns`, by phase: `{ "task": { "wallClockMinutes": 120 } }`. Other keys are refused. |
 | `watch`         | `[]`               | Workflows whose latest run must be green. See [`repos[].watch`](#reposwatch). |
 
-`repos[].release`: `{ "enabled", "time", "readEveryMinutes", "from", "to", "check" }`. `enabled`, `time` and `readEveryMinutes` default to the top-level `release`; `from` to `baseBranch`; `to` to `"main"`; `check` to the repo's `requiredCheck`. A release is cut at the newest `from` commit where `check` is green; `null` cuts at the tip. A repo whose `from` equals `to` has no promotion PR.
+`repos[].release`: `{ "enabled", "time", "readEveryMinutes", "from", "to", "check", "signal" }`. `enabled`, `time` and `readEveryMinutes` default to the top-level `release`; `from` to `baseBranch`; `to` to `"main"`; `check` to the repo's `requiredCheck`; `signal` to `"merged"`. A release is cut at the newest `from` commit where `check` is green; `null` cuts at the tip. A repo whose `from` equals `to` has no promotion PR.
+
+`signal` decides when a closed issue loses `q:promote`:
+
+- `"merged"`: its PR is no longer ahead of `to`.
+- `{ "workflow": "cd.yml" }`: as `"merged"`, and the newest completed run of that workflow on `to` succeeded on a commit that contains the PR's merge commit. A failed newest run, or no successful run that contains the PR yet, keeps the label. Cancelled and skipped runs are passed over. Checked at most every `readEveryMinutes`.
+
+Any other value is refused.
 
 ### `repos[].watch`
 

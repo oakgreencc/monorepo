@@ -90,7 +90,16 @@ import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
  *   `files`: how many files differ between the merge base and `head`. `commits`: oldest first, at most 250.
  *   `base`: the base branch's health, when the repo has a `requiredCheck`.
  * @typedef {{
+ *   issuesAt: string | null, prsAt: string | null, heads: Record<string, string | null>,
+ *   rateLimit: { cost: number, remaining: number, resetAt: string } | null,
+ * }} Probe
+ *   The cheap read before the snapshot ({@link PROBE_QUERY}): the newest `updatedAt` of any issue and of any PR
+ *   in the repo, and the head oid of each branch the snapshot compares (`baseBranch`, and the release's `from`
+ *   and `to`). Equal probes: nothing the snapshot reads has changed, except check results and `mergeable`, which
+ *   bump no `updatedAt` (tick.mjs `fullReadDue`).
+ * @typedef {{
  *   read(slug: string, opts?: { fresh?: boolean }): Promise<Snapshot>,
+ *   probe?(slug: string): Promise<Probe>,
  *   label(slug: string, number: number, change: { add: string[], remove: string[] }): Promise<void>,
  *   writeState(slug: string, number: number, commentId: number | null, body: string): Promise<number>,
  *   close(slug: string, number: number, body: string, opts?: { reason?: 'completed' | 'not_planned' | 'duplicate' }): Promise<void>,
@@ -113,10 +122,13 @@ import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
  *   readIssues(slug: string, numbers: number[]): Promise<Map<number, Issue>>,
  *   workflowRuns(slug: string, workflow: string, branch: string): Promise<import('./watch.mjs').WorkflowRun[]>,
  *   mergeRules(slug: string, base: string): Promise<MergeRules>,
+ *   mergeCommit(slug: string, number: number): Promise<string | null>,
  * }} GitHub
+ *   `probe`: optional; without it every tick reads the full snapshot.
  *   `mergeRules`: what `base` requires before a merge ({@link MergeRules}); read only for a PR already stalled.
  *   `workflowRuns`: the newest completed push or schedule runs of `workflow` (file name or id) on `branch`, newest
- *   first (watch.mjs).
+ *   first (watch.mjs). `mergeCommit`: the commit a merged PR made on its base (null: not merged), for a workflow
+ *   promotion signal (promotion.mjs).
  *   `greenCommit`: the newest commit on `ref`'s first-parent line, at most `depth` back, whose `check` concluded
  *   success (`check` null: the tip). `compareRange`: GitHub's compare of `base...head`. `branches`: the branch
  *   names starting with `prefix`. `createBranch`: a new branch at `sha`.
@@ -225,6 +237,38 @@ export const issuesQuery = (numbers) =>
     .map((n) => `i${n}: issueOrPullRequest(number: ${n}) { __typename ... on Issue { ...I } }`)
     .join(' ')} } }
 ${SNAPSHOT_QUERY.slice(SNAPSHOT_QUERY.indexOf('fragment I on Issue'), SNAPSHOT_QUERY.indexOf('fragment P on'))}`
+
+/**
+ * About one point: whether anything {@link SNAPSHOT_QUERY} reads may have changed. Every issue and PR, whatever
+ * its state or labels, so one that left the queue (closed, merged, unlabelled) or a new one (for adoption) counts.
+ */
+export const PROBE_QUERY = `query($owner: String!, $name: String!, $base: String!, $release: Boolean!, $from: String!, $to: String!) {
+  rateLimit { cost remaining resetAt }
+  repository(owner: $owner, name: $name) {
+    issues(first: 1, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { updatedAt } }
+    pullRequests(first: 1, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { updatedAt } }
+    base: ref(qualifiedName: $base) { target { oid } }
+    from: ref(qualifiedName: $from) @include(if: $release) { target { oid } }
+    to: ref(qualifiedName: $to) @include(if: $release) { target { oid } }
+  }
+}`
+
+/** GraphQL `data` for {@link PROBE_QUERY} → {@link Probe}. @param {any} data @returns {Probe} */
+export function normalizeProbe(data) {
+  const d = data?.data ?? data
+  const repo = d?.repository
+  if (!repo) throw new Error('probe: no repository in the answer')
+  /** @type {Record<string, string | null>} */
+  const heads = { base: repo.base?.target?.oid ?? null }
+  if ('from' in repo) heads.from = repo.from?.target?.oid ?? null
+  if ('to' in repo) heads.to = repo.to?.target?.oid ?? null
+  return {
+    issuesAt: repo.issues?.nodes?.[0]?.updatedAt ?? null,
+    prsAt: repo.pullRequests?.nodes?.[0]?.updatedAt ?? null,
+    heads,
+    rateLimit: d?.rateLimit ?? null,
+  }
+}
 
 /** The queued issues after `$after`: the snapshot's first page holds 100, a busy repo has more. */
 export const ISSUES_PAGE_QUERY = `query($owner: String!, $name: String!, $labels: [String!], $after: String) { repository(owner: $owner, name: $name) {
@@ -665,6 +709,21 @@ export function graftGitHub({ config, exec: run = exec, now = Date.now }) {
       })
       return addIssues(snap, more, unread, config.graft.botLogin)
     },
+    async probe(slug) {
+      const [owner, name] = slug.split('/')
+      const repo = config.repos.find((x) => x.slug === slug)
+      const r = repo?.release
+      const release = r && r.from !== r.to ? r : null
+      const vars = JSON.stringify({
+        owner,
+        name,
+        base: `refs/heads/${repo?.baseBranch ?? 'main'}`,
+        release: Boolean(release),
+        from: release ? `refs/heads/${release.from}` : '',
+        to: release ? `refs/heads/${release.to}` : '',
+      })
+      return normalizeProbe(await json(graft(slug, ['graphql', PROBE_QUERY, '--vars', vars])))
+    },
     async label(slug, number, { add, remove }) {
       if (!add.length && !remove.length) return
       touch(slug, number)
@@ -813,6 +872,10 @@ export function graftGitHub({ config, exec: run = exec, now = Date.now }) {
       const path = `/repos/${slug}/branches/${ref}/protection`
       const protection = await json(graft(slug, ['api', 'GET', path])).catch(() => null)
       return mergeRulesOf(rules, names, protection)
+    },
+    async mergeCommit(slug, number) {
+      const pr = await json(graft(slug, ['api', 'GET', `/repos/${slug}/pulls/${number}`]))
+      return pr?.merged_at && pr.merge_commit_sha ? String(pr.merge_commit_sha) : null
     },
     async linkIssue(slug, pr, issue) {
       const path = `/repos/${slug}/pulls/${pr}`
