@@ -8,3 +8,9 @@
 Work in a worktree under `.claude/worktrees/<topic>`. When finished, remove it (ExitWorktree `remove`, no `discard_changes`). The `finish-worktree` hook runs `graft worktree done` first. If the remove is denied, the worktree holds work GitHub lacks: publish it, don't discard it.
 
 A change to a user-facing fact (a flag, default, label, behaviour) updates the matching page in `docs/` in the same PR. Those pages are for humans: follow [docs/AGENTS.md](docs/AGENTS.md).
+
+## Agent skills
+
+### Triage labels
+
+File issues with `q:intake` only; cambium triages and moves them. See `docs/agents/triage-labels.md`.
