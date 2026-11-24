@@ -10,6 +10,7 @@
  * session is posted through graft as the App; the marker says a person (`answerer`) made it. It is separate from the
  * state marker (marker.mjs) and is the only way an App or bot comment counts.
  */
+import { parseDecideMarker } from './graphs/decide.mjs'
 import { parseMarker } from './marker.mjs'
 
 /**
@@ -49,11 +50,11 @@ export function parseAnswer(body) {
 
 /**
  * Whether `c` is a reply rather than cambium talking to itself, regardless of time: never a comment carrying a state
- * marker; an answer comment always; otherwise a human's (an author, not a `Bot`, not one of `self`).
+ * marker or a `cambium:decide` marker; an answer comment always; otherwise a human's (an author, not a `Bot`, not one of `self`).
  * @param {Comment} c @param {Set<string | null | undefined>} self
  */
 export function isReply(c, self) {
-  if (parseMarker(c.body)) return false
+  if (parseMarker(c.body) || parseDecideMarker(c.body)) return false
   if (parseAnswer(c.body)) return true
   return !!c.author && !c.bot && !self.has(c.author)
 }
@@ -83,8 +84,8 @@ export function stateSince(m) {
 
 /**
  * The human replies on `issue` written after `since`, oldest first. Never cambium's: not by `botLogin`, not by the
- * login that wrote the state comment, not a `Bot`-type author, and not a comment carrying a state marker; except an
- * answer comment ({@link parseAnswer}), which counts whoever wrote it. No `since`: none (nothing to be a reply to).
+ * login that wrote the state comment, not a `Bot`-type author, and not a comment carrying a state marker or a
+ * `cambium:decide` marker (graphs/decide.mjs); except an answer comment ({@link parseAnswer}), which counts whoever wrote it. No `since`: none (nothing to be a reply to).
  * @param {Issue} issue @param {{ since: string | null, botLogin?: string | null }} o @returns {Comment[]}
  */
 export function humanReplies(issue, { since, botLogin = null }) {

@@ -16,10 +16,12 @@
  *    heartbeat carries it while it holds (`repos[].stall.starved`).
  * 5. **Re-triage, narrowly:** only the `q:human` issues involved in a cycle, a chain or a starvation (the cycle's
  *    members, the issues the parked ones wait on), and only those whose triage inputs changed since triage answered
- *    needs-human (triage-inputs.mjs). Never the whole `q:human` queue; never one whose inputs are unchanged.
+ *    needs-human (triage-inputs.mjs). Never the whole `q:human` queue; never one whose inputs are unchanged; never
+ *    one with a live decision (a `cambium:decide` marker leased or paused, graphs/decide.mjs).
  *
  * State lives in the store (`stall:<repo>`), so a restart neither re-reports nor forgets an open issue.
  */
+import { isLiveDecision } from './graphs/decide.mjs'
 import { dispatch } from './graphs/dispatch.mjs'
 import { iso, key, markerOf, MIN, setLabels, setMarker } from './issue-state.mjs'
 import { move, Q, RUNNING, STALL_LABEL, WAIT, WHY } from './labels.mjs'
@@ -389,6 +391,7 @@ async function checkRepo(deps, ctx, slug, snap) {
         i.labels.includes(Q.human) &&
         !i.labels.includes(WHY.approve) &&
         !reports.has(i.number) &&
+        !isLiveDecision(i.decideComment?.marker) &&
         !busy(i),
     )
   await each(

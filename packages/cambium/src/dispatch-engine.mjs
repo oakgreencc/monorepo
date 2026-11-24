@@ -5,7 +5,7 @@
  *
  * - Reconcile: every tracked triage worker's issue at `triaging`.
  * - Sweep: a stale `running` lease on a `q:intake` issue runs `retry-triage`.
- * - Schedule: first wakes: a `q:human` issue (not `why:approve`) without a lease that has a human reply since it
+ * - Schedule: first wakes: a `q:human` issue (not `why:approve`) without a lease or a live decision that has a human reply since it
  *   entered its state (human-reply.mjs) goes back to `q:intake` at `start-triage`, attempt 1, history kept (outcome
  *   `human-reply`); a parked intake issue (`deferred` / `blocked`) with one is triaged now, whatever its blockers or
  *   `deferUntil`. Then parks: a `q:intake` issue without a lease that has an open GitHub `blockedBy` issue goes to the
@@ -18,6 +18,7 @@
  * admits entries), at a wait that is not ready, or at the end.
  */
 import { advance } from './graph/index.mjs'
+import { isLiveDecision } from './graphs/decide.mjs'
 import { dispatch, lostLeaseOf, nodeOf, openBlockers } from './graphs/dispatch.mjs'
 import { iso, key, markerOf, setLabels, setMarker } from './issue-state.mjs'
 import { byPriorityThenAge, move, Q, RUNNING, WAIT, WHY } from './labels.mjs'
@@ -233,7 +234,8 @@ function replied(deps, issue) {
 }
 
 /**
- * Wake: every `q:human` issue (any `why:*` but `why:approve`) with no lease, no tracked worker and a
+ * Wake: every `q:human` issue (any `why:*` but `why:approve`) with no lease, no tracked worker, no live decision
+ * (a `cambium:decide` marker leased or paused: its replies are the decision's, graphs/decide.mjs) and a
  * human reply since it entered its state goes back to `q:intake` at `start-triage`, attempt 1, its history kept with
  * a `human-reply` entry and the `reply` context the triage prompt quotes. The new state starts now, so the same
  * reply never wakes it again: a triage that answers needs-human again rests until the next reply.
@@ -251,6 +253,7 @@ async function wake(deps, ctx) {
           !i.labels.includes(WHY.approve) &&
           !i.labels.includes(RUNNING) &&
           !deps.store.worker(slug, i.number) &&
+          !isLiveDecision(i.decideComment?.marker) &&
           !ctx.touched.has(key(slug, i.number)),
       ),
       async (issue) => {

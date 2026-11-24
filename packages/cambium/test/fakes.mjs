@@ -6,10 +6,17 @@
  */
 import { resolveConfig } from '../src/config.mjs'
 import { resolveConvention } from '../src/convention.mjs'
+import { parseDecideMarker } from '../src/graphs/decide.mjs'
 import { parseMarker } from '../src/marker.mjs'
 import { openStore } from '../src/store.mjs'
 
 export const SLUG = 'o/r'
+
+/** The last comment holding a `cambium:decide` marker, as github.mjs reads it. @param {{ id?: number, body: string }[]} comments */
+const decideCommentOf = (comments) => {
+  const c = comments.findLast((x) => parseDecideMarker(x.body))
+  return c ? { id: c.id ?? 0, marker: /** @type {any} */ (parseDecideMarker(c.body)) } : null
+}
 export const T0 = Date.parse('2026-11-16T12:00:00Z')
 
 /**
@@ -101,6 +108,7 @@ export function fakeGitHub({ issues = [], prs = [] } = {}) {
       return s ? { ...b, state: s.state, closedAt: s.state === 'CLOSED' ? b.closedAt : null } : { ...b }
     }),
     comments: i.comments.map((c) => ({ ...c })),
+    decideComment: decideCommentOf(i.comments),
   })
 
   /** @type {import('../src/github.mjs').GitHub} */
