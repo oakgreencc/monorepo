@@ -29,7 +29,7 @@ import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
  *   checks: 'SUCCESS' | 'FAILURE' | 'ERROR' | 'PENDING' | 'EXPECTED' | null, failing: FailingCheck[], closes: number[],
  *   mergeable: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN' | null,
  *   reviewDecision: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null, createdAt: string | null,
- *   updatedAt?: string | null, mergeState?: string | null, autoMergeAt?: string | null,
+ *   updatedAt?: string | null, mergedAt?: string | null, mergeState?: string | null, autoMergeAt?: string | null,
  *   title?: string, draft?: boolean, queue?: { position: number | null, state: string | null } | null,
  *   additions?: number | null, deletions?: number | null, files?: number | null, counts?: CheckCount[],
  *   base?: string | null, approvals?: number, codeOwnerRequests?: string[], checkNames?: string[],
@@ -129,7 +129,7 @@ import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
  *   an issue is left out.
  */
 
-const PR_FIELDS = `number url title headRefName baseRefName state headRefOid isDraft isInMergeQueue body mergeable mergeStateStatus reviewDecision createdAt updatedAt
+const PR_FIELDS = `number url title headRefName baseRefName state headRefOid isDraft isInMergeQueue body mergeable mergeStateStatus reviewDecision createdAt updatedAt mergedAt
   additions deletions changedFiles
   headRef { id }
   autoMergeRequest { enabledAt }
@@ -500,6 +500,7 @@ export function normalize(data, { botLogin = null, release = null, health = null
       reviewDecision: p.reviewDecision ?? null,
       createdAt: p.createdAt ?? null,
       updatedAt: p.updatedAt ?? null,
+      mergedAt: p.mergedAt ?? null,
       title: p.title ?? '',
       draft: Boolean(p.isDraft),
       queue: p.mergeQueueEntry

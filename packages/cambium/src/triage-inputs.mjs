@@ -1,7 +1,7 @@
 // @ts-check
 /**
- * Triage inputs: what a triage verdict was drawn from, hashed, so the daily re-triage can skip a `q:human` issue
- * nothing has changed on since triage answered needs-human (upkeep.mjs `retriage`).
+ * Triage inputs: what a triage verdict was drawn from, hashed, so the stalled-queue fallback (stall.mjs) re-triages
+ * a `q:human` issue only when something changed on it since triage answered needs-human.
  *
  * The fingerprint covers the issue's title and body, its labels (not cambium's own: `q:*`, `why:*`, `wait:*`,
  * `running`), the ids of its human comments (human-reply.mjs: not cambium, not a bot, not a state marker), its
@@ -18,17 +18,15 @@ import { RUNNING } from './labels.mjs'
  * @typedef {import('./github.mjs').Issue} Issue
  * @typedef {import('./github.mjs').Snapshot} Snapshot
  * @typedef {{ hash: string, at: string }} Fingerprint
- *   `at`: when it was taken, the start of the triage that answered; the backstop counts from it.
+ *   `at`: when it was taken, the start of the triage that answered.
  */
 
 /**
  * The triage prompt and rubric's version. Bump it with any change to how triage judges an issue
- * (phases/dispatch.mjs `triagePrompt`): every fingerprint stops matching, so the next re-triage looks at every
- * `q:human` issue again.
+ * (phases/dispatch.mjs `triagePrompt`): every fingerprint stops matching, so each `q:human` issue the stall fallback
+ * finds involved in a stall is looked at again.
  */
 export const TRIAGE_RUBRIC = 1
-
-const DAY = 24 * 60 * 60_000
 
 /** cambium's own labels: moving an issue between queues is not a change triage should see. @param {string} l */
 const cambiumLabel = (l) => l === RUNNING || /^(q|why|wait):/.test(l)
@@ -68,20 +66,16 @@ export const fingerprintOf = (issue, snap, o) =>
     .slice(0, 16)
 
 /**
- * Whether re-triage sends a `q:human` issue back to triage. Pure.
- * - `unchanged`: the marker's fingerprint matches and is younger than `maxSkipDays`: stays.
- * - `changed`, `no fingerprint` (an issue triage never answered needs-human on, or one from before fingerprints),
- *   `backstop` (unchanged for `maxSkipDays`, so a change the fingerprint cannot see is seen eventually): goes.
+ * Whether the stall fallback sends a `q:human` issue back to triage. Pure. Only `changed` does: the marker's
+ * fingerprint no longer matches the issue. `unchanged` stays; so does `no fingerprint` (an issue triage never
+ * answered needs-human on, such as a spent budget, or one from before fingerprints): nothing says its inputs moved.
  *
- * @param {Issue} issue @param {Snapshot | undefined} snap
- * @param {{ now: number, maxSkipDays: number, botLogin?: string | null, rubric?: number }} o
- * @returns {{ retriage: boolean, why: 'unchanged' | 'changed' | 'no fingerprint' | 'backstop' }}
+ * @param {Issue} issue @param {Snapshot | undefined} snap @param {{ botLogin?: string | null, rubric?: number }} [o]
+ * @returns {{ retriage: boolean, why: 'unchanged' | 'changed' | 'no fingerprint' }}
  */
-export function retriageDecision(issue, snap, { now, maxSkipDays, botLogin, rubric }) {
+export function retriageDecision(issue, snap, o) {
   const fp = issue.stateComment?.marker?.fingerprint
-  const at = fp ? Date.parse(fp.at) : NaN
-  if (!fp?.hash || !Number.isFinite(at)) return { retriage: true, why: 'no fingerprint' }
-  if (fp.hash !== fingerprintOf(issue, snap, { botLogin, rubric })) return { retriage: true, why: 'changed' }
-  if (now - at >= maxSkipDays * DAY) return { retriage: true, why: 'backstop' }
+  if (!fp?.hash) return { retriage: false, why: 'no fingerprint' }
+  if (fp.hash !== fingerprintOf(issue, snap, o)) return { retriage: true, why: 'changed' }
   return { retriage: false, why: 'unchanged' }
 }

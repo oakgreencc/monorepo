@@ -9,6 +9,7 @@
 import { capsFor } from './config.mjs'
 import { watchStates, watchWorkflows } from './watch.mjs'
 import { stallStates, watchStalls } from './merge-stall.mjs'
+import { stallState } from './stall.mjs'
 import { byPriorityThenAge, move, Q, queueOf, RUNNING, WHY } from './labels.mjs'
 import { withHistory } from './marker.mjs'
 import { failureSummary, iso, key, markerOf, MIN, setLabels, setMarker } from './issue-state.mjs'
@@ -720,6 +721,7 @@ async function release(deps, ctx) {
  *     base: import('./base-health.mjs').BaseHealth | null,
  *     watch: import('./watch.mjs').WatchState[],
  *     stalls: import('./merge-stall.mjs').Stall[],
+ *     stall: import('./stall.mjs').StallState,
  *     rateLimit: { cost: number, remaining: number, resetAt: string } | null,
  *     cost: { issues: IssueCost[], days: import('./cost.mjs').CostDay[] },
  *   }[],
@@ -817,6 +819,7 @@ export function heartbeatState(deps, ctx) {
       base: snap?.base ?? null,
       watch: watchStates(deps, r.slug),
       stalls: stallStates(deps.store, r.slug),
+      stall: stallState(deps.store, r.slug),
       rateLimit: snap?.rateLimit ?? null,
       cost: {
         issues: snap ? issueCosts(snap, config.costFlagUsd) : [],

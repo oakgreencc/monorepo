@@ -36,7 +36,7 @@ One JSON file: `--config`, else `$CAMBIUM_CONFIG`, else `~/.cambium/config.json`
   "priorityLabels": ["priority:critical", "priority:high", "priority:medium", "priority:low"],
   "release": { "enabled": false, "time": "06:00", "readEveryMinutes": 5 },
   "reaper": { "everyMinutes": 60, "staleMinutes": 30, "orphanDays": 3 },
-  "retriage": { "enabled": false, "time": "05:00", "maxSkipDays": 14 },
+  "stall": { "everyMinutes": 15, "starvedHours": 6, "graceMinutes": 60, "overdueMinutes": 60 },
   "intake": { "adopt": true, "ignoreLabels": [] },
   "rescue": {
     "everyMinutes": 60,
@@ -89,7 +89,7 @@ A file that does not load, or has no `repos`, keeps the running config and logs 
 
 | Key                   | Default | Meaning                                                                                                   |
 | --------------------- | ------- | --------------------------------------------------------------------------------------------------------- |
-| `intake.adopt`        | `true`  | An open issue in no queue gains `q:intake`, so it is triaged without anyone adding the label. Skipped: issues cambium has handled (they have a state comment), issues an agent PR names, and issues labelled `watch`, `red-base` or `rescue`. |
+| `intake.adopt`        | `true`  | An open issue in no queue gains `q:intake`, so it is triaged without anyone adding the label. Skipped: issues cambium has handled (they have a state comment), issues an agent PR names, and issues labelled `watch`, `red-base`, `rescue` or `stall`. |
 | `intake.ignoreLabels` | `[]`    | Issues with any of these labels are never adopted, such as tracking or parent issues.                     |
 
 ## `repos[]`
@@ -154,9 +154,10 @@ Verdicts are kept in the store across restarts, and each repo's are in the heart
 | `reaper.everyMinutes`    | `60`      | Reaper interval; `0` turns it off.                                              |
 | `reaper.staleMinutes`    | `30`      | An untracked agent PR idle this long is examined.                               |
 | `reaper.orphanDays`      | `3`       | A PR naming no issue is closed after this long untouched.                       |
-| `retriage.enabled`       | `false`   | Daily return of `q:human` issues (not `why:approve`) to `q:intake`.             |
-| `retriage.time`          | `"05:00"` | Host-local `HH:MM`.                                                             |
-| `retriage.maxSkipDays`   | `14`      | An unchanged `q:human` issue is re-triaged anyway after this many days; `0` never skips. |
+| `stall.everyMinutes`     | `15`      | [Stall fallback](/reference/cambium/graphs/#stall) interval; `0` turns it off.  |
+| `stall.graceMinutes`     | `60`      | A `wait:blocked` issue is unparked this long after its last blocker closed; a chain into `q:human` is reported once parked this long. |
+| `stall.overdueMinutes`   | `60`      | A `wait:deferred` issue is unparked this long past its `deferUntil`.            |
+| `stall.starvedHours`     | `6`       | Starved: no merge for this long while only parked issues are queued.            |
 | `rescue.everyMinutes`    | `60`      | Stuck-item sweep interval.                                                      |
 | `rescue.staleHours`      | `12`      | Age for `stale-task`, `stale-intake` and `pr-stale`.                            |
 | `rescue.graceMinutes`    | `30`      | A label change counts only after this long since the marker last moved.         |
@@ -165,6 +166,8 @@ Verdicts are kept in the store across restarts, and each repo's are in the heart
 | `rescue.causeRepo`       | `null`    | Repository for root-cause tickets; `null` files them in the item's own repo.    |
 | `update.auto`            | `false`   | Self-update between ticks.                                                      |
 | `update.checkMinutes`    | `360`     | Check interval; minimum 5.                                                      |
+
+`retriage` is removed: the stall fallback replaced the daily re-triage. A `retriage` key in an old file is ignored.
 
 ### `gc`
 
