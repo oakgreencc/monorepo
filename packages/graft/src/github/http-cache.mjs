@@ -9,10 +9,20 @@
  *
  * Entries are one JSON file each under `dir`, named by a hash of the key. Anything that fails (a full disk, a
  * corrupt file, a race between two processes) is a cache miss, never an error. Bodies over {@link MAX_BODY} are not
- * kept. Entries untouched for {@link MAX_AGE_MS} are pruned, a few at a time, when one is written.
+ * kept. An entry's file mtime is its last use: a write sets it, and `touch` (called when a 304 is answered from
+ * the entry) refreshes it. Entries unused for {@link MAX_AGE_MS} are pruned, a few at a time, when one is written.
  */
 import { createHash } from 'node:crypto'
-import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 
 /** The largest body kept, in characters. */
@@ -26,7 +36,8 @@ const PRUNE_PER_WRITE = 20
 
 /**
  * @typedef {{ etag: string, text: string, next: string | null }} CacheEntry
- * @typedef {{ get(key: string): CacheEntry | null, set(key: string, entry: CacheEntry): void }} HttpCache
+ * @typedef {{ get(key: string): CacheEntry | null, set(key: string, entry: CacheEntry): void, touch(key: string): void }} HttpCache
+ *   `touch`: marks the entry used now, so a tag that keeps answering 304 is not pruned.
  */
 
 /**
@@ -70,6 +81,12 @@ export function etagCache(dir, { now = Date.now } = {}) {
         writeFileSync(tmp, JSON.stringify(entry))
         renameSync(tmp, p)
         prune()
+      } catch {}
+    },
+    touch(key) {
+      try {
+        const t = now() / 1000
+        utimesSync(file(key), t, t)
       } catch {}
     },
   }
