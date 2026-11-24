@@ -54,7 +54,7 @@ import { join, resolve } from 'node:path'
  *   priorityLabels: string[],
  *   release: { enabled: boolean, time: string, readEveryMinutes: number },
  *   reaper: { everyMinutes: number, staleMinutes: number, orphanDays: number },
- *   retriage: { enabled: boolean, time: string, maxSkipDays: number },
+ *   stall: import('./stall.mjs').StallConfig,
  *   intake: { adopt: boolean, ignoreLabels: string[] },
  *   rescue: RescueConfig,
  *   paths: { home: string, db: string, heartbeat: string, queues: string, snapshots: string, logs: string },
@@ -68,6 +68,10 @@ import { join, resolve } from 'node:path'
  *   `mergeStallMinutes`: an agent PR whose auto-merge has been armed this long, with green checks, while GitHub
  *   still reports it BLOCKED (a rule cambium cannot see holds it) goes to `q:human` with GitHub's state. 0: off.
  *   `watchEveryMinutes`: how often each repo's `watch` workflows are read (watch.mjs).
+ *   `stall`: the stalled-queue fallback (stall.mjs, `engine: "graph"`): every `everyMinutes` (0: off) it unparks a
+ *   `wait:blocked` issue whose blockers all closed `graceMinutes` ago and a `wait:deferred` one `overdueMinutes` past
+ *   its `deferUntil`, reports blocked-by loops (a chain into `q:human` counts once parked `graceMinutes`), and warns
+ *   when nothing has merged for `starvedHours` while only parked issues are queued.
  *   `intake.adopt`: an open issue in no queue that cambium has never touched (no state comment, no agent PR naming
  *   it) is labelled `q:intake`, so an issue filed without the label is triaged instead of ignored (adopt.mjs).
  *   `intake.ignoreLabels`: issues with any of these labels are left alone (tracking or parent issues, say).
@@ -121,7 +125,7 @@ export function defaults(home = DEFAULT_HOME) {
     priorityLabels: ['priority:critical', 'priority:high', 'priority:medium', 'priority:low'],
     release: { enabled: false, time: '06:00', readEveryMinutes: 5 },
     reaper: { everyMinutes: 60, staleMinutes: 30, orphanDays: 3 },
-    retriage: { enabled: false, time: '05:00', maxSkipDays: 14 },
+    stall: { everyMinutes: 15, starvedHours: 6, graceMinutes: 60, overdueMinutes: 60 },
     intake: { adopt: true, ignoreLabels: [] },
     rescue: { everyMinutes: 60, staleHours: 12, graceMinutes: 30, cooldownHours: 24, maxRescues: 2, causeRepo: null },
     paths: {
@@ -220,9 +224,11 @@ export function resolveConfig(raw = {}) {
   for (const k of /** @type {const} */ (['home', 'db', 'heartbeat', 'queues', 'snapshots', 'logs']))
     config.paths[k] = untilde(config.paths[k])
   if (!/^\d{2}:\d{2}$/.test(config.release.time)) throw new Error(`config: release.time must be HH:MM`)
-  if (!/^\d{2}:\d{2}$/.test(config.retriage.time)) throw new Error(`config: retriage.time must be HH:MM`)
-  if (typeof config.retriage.maxSkipDays !== 'number' || !(config.retriage.maxSkipDays >= 0))
-    throw new Error(`config: retriage.maxSkipDays must be a number of days ≥ 0`)
+  // Removed: the stall fallback (stall.*) replaced the daily re-triage. An old file's key is ignored.
+  delete (/** @type {any} */ (config).retriage)
+  for (const k of /** @type {const} */ (['everyMinutes', 'starvedHours', 'graceMinutes', 'overdueMinutes']))
+    if (!(typeof config.stall[k] === 'number' && config.stall[k] >= 0))
+      throw new Error(`config: stall.${k} must be a number, at least 0, got ${JSON.stringify(config.stall[k])}`)
   if (typeof config.intake.adopt !== 'boolean') throw new Error(`config: intake.adopt must be true or false`)
   if (!Array.isArray(config.intake.ignoreLabels) || config.intake.ignoreLabels.some((l) => typeof l !== 'string'))
     throw new Error(`config: intake.ignoreLabels must be a list of label names`)

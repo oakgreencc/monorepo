@@ -42,12 +42,10 @@ The same applies to issues parked as deferred or blocked: a reply gets them tria
 
 Move the issue's label from `q:human` to `q:task` (straight to work) or `q:intake` (triage again), and remove its `why:*` and `ask:*` labels.
 
-## Re-triage the whole queue daily
+## Send an issue back to triage
 
-```json
-{ "retriage": { "enabled": true, "time": "05:00" } }
-```
+Comment on it. A human reply returns a `q:human` issue to triage on the next tick.
 
-Every `q:human` issue except `why:approve` goes back to `q:intake` once a day. `time` is local.
+cambium no longer re-triages the whole queue daily. Its [stall fallback](/reference/cambium/graphs/#stall) re-triages only `q:human` issues that hold up parked work, and only once something on them changed.
 
 Label meanings in full: [Labels and state](/reference/cambium/labels-and-state/).

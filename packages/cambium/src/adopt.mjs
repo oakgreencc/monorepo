@@ -9,7 +9,7 @@
  * - an issue with a state comment: cambium has handled it, and its fate is another graph's (a PR in flight, the
  *   rescue graph's stranded check);
  * - an issue an agent PR names (it closes it, or its branch names it): submitted;
- * - an issue cambium filed for its own reasons (`watch`, `red-base`, `rescue`), or one carrying a label in
+ * - an issue cambium filed for its own reasons (`watch`, `red-base`, `rescue`, `stall`), or one carrying a label in
  *   `intake.ignoreLabels`.
  *
  * Off with `intake.adopt: false`. The search reads {@link import('./github.mjs').UNQUEUED} issues a tick, oldest
@@ -18,12 +18,12 @@
 import { REPAIR_LABEL } from './base-health.mjs'
 import { branchIssue } from './github.mjs'
 import { setLabels } from './issue-state.mjs'
-import { move, Q, queueOf, RESCUE_LABEL, RUNNING } from './labels.mjs'
+import { move, Q, queueOf, RESCUE_LABEL, RUNNING, STALL_LABEL } from './labels.mjs'
 import { each } from './tick.mjs'
 import { WATCH_LABEL } from './watch.mjs'
 
 /** Labels cambium puts on issues it files itself: never adopted. */
-const OWN = new Set([WATCH_LABEL, REPAIR_LABEL, RESCUE_LABEL])
+const OWN = new Set([WATCH_LABEL, REPAIR_LABEL, RESCUE_LABEL, STALL_LABEL])
 
 /**
  * The issues in one repo's snapshot to adopt into `q:intake`. Pure.
