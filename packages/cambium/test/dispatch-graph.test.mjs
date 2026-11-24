@@ -209,6 +209,7 @@ const DECIDE = {
   ],
   recommendation: 'The task tick',
   interactive: true,
+  lens: 'technical',
 }
 
 test('needs-human with an ask → ask:* labels beside why:triage; the state comment renders it', async () => {

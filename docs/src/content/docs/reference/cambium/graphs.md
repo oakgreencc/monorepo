@@ -141,7 +141,8 @@ The worker's final message ends with a JSON block (the last fenced block of the 
     question: string,
     options?: { label: string, detail: string }[],   // two or more; required for decide
     recommendation?: string,
-    interactive: boolean  // a live session with the code would help
+    interactive: boolean, // a live session with the code would help
+    lens?: 'product' | 'technical'  // required for an interactive decide
   }
 }
 ```
@@ -162,6 +163,7 @@ The worker's final message ends with a JSON block (the last fenced block of the 
 - A human reply: a comment after the issue entered its state, whose author is not `graft.botLogin`, not the state comment's author, and not a `Bot` account. A comment with a state marker never counts.
 - An answer comment counts as a human reply whoever wrote it, the App included: one carrying `<!-- cambium:answer {"graph":"decide","decideAt":"…","answerer":"<login>"} -->`. Triage sees `answerer` as the reply's author. A malformed payload, or one without `answerer`, is ignored. Triage treats an answer with a decision and acceptance checks as normally `actionable`.
 - Closed or relabelled during triage: verdict dropped.
+- `lens` says which kind of decision an interactive `decide` is: `product` for what users get (scope, behaviour, wording, defaults, priority), `technical` for how it is built (architecture, interfaces, dependencies, data model). An unknown `lens` counts as none: it is dropped where it is optional and makes the `ask` invalid where it is required.
 - `ask` is read only on `needs-human`. An issue waiting on another open issue that is itself a human chore or check is `blocked` by it, not `needs-human`.
 
 ## release-prepare

@@ -13,6 +13,7 @@
  */
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { ASK_LENSES, ASK_SESSION } from './ask.mjs'
 import { Q, WHY } from './labels.mjs'
 import { branchIssue } from './github.mjs'
 
@@ -20,9 +21,9 @@ import { branchIssue } from './github.mjs'
  * @typedef {import('./github.mjs').Issue} Issue
  * @typedef {import('./github.mjs').PullRequest} PullRequest
  * @typedef {{ label: string, detail: string }} AskOption
- * @typedef {{ question?: string, options?: AskOption[], recommendation?: string }} Ask
+ * @typedef {{ kind?: string, question?: string, options?: AskOption[], recommendation?: string, lens?: string }} Ask
  *   What a typed escalation asks the human; read from the marker's `ask` when it has one. Options keep the
- *   `{ label, detail }` shape of `ask.mjs`'s asks; one without a string label is dropped.
+ *   `{ label, detail }` shape of `ask.mjs`'s asks; one without a string label is dropped. `lens` only when valid.
  * @typedef {{
  *   read(path: string): string | null, write(path: string, text: string): void, remove(path: string): void,
  *   list(dir: string): string[],
@@ -32,12 +33,23 @@ import { branchIssue } from './github.mjs'
 
 const BODY_KEPT = 4000
 
+/** The labels of a decision to work through in a session (ask.mjs: an interactive `decide`). */
+const DECIDE_SESSION = ['ask:decide', ASK_SESSION]
+
+/** The command a decide session starts with. */
+export const DECIDE_COMMAND = '/oakgreen:decide'
+
+/** @param {{ labels: string[] }} issue */
+const isDecideSession = (issue) => DECIDE_SESSION.every((l) => issue.labels.includes(l))
+
 /**
  * Whether an issue gets a brief: in `q:human` for a reason worth an interactive session. The one place that
- * decides; today `why:budget` (attempts or reworks spent).
+ * decides: `why:budget` (attempts or reworks spent), or `ask:decide` + `ask:session` (a decision to work through
+ * with the code).
  * @param {{ labels: string[] }} issue
  */
-export const isSessionCandidate = (issue) => issue.labels.includes(Q.human) && issue.labels.includes(WHY.budget)
+export const isSessionCandidate = (issue) =>
+  issue.labels.includes(Q.human) && (issue.labels.includes(WHY.budget) || isDecideSession(issue))
 
 /** `owner/name` → the brief directory's name. @param {string} slug */
 export const repoDir = (slug) => slug.replace('/', '__')
@@ -109,7 +121,10 @@ function askOf(v) {
     ...(options.length ? { options } : {}),
     ...(typeof a.recommendation === 'string' && a.recommendation ? { recommendation: a.recommendation } : {}),
   }
-  return Object.keys(ask).length ? ask : null
+  if (!Object.keys(ask).length) return null
+  const kind = typeof a.kind === 'string' && a.kind ? a.kind : undefined
+  const lens = ASK_LENSES.find((l) => l === a.lens)
+  return { ...(kind ? { kind } : {}), ...ask, ...(lens ? { lens } : {}) }
 }
 
 /**
@@ -132,13 +147,23 @@ export function renderBrief({ slug, repoPath, issue, prs, maxAttempts, maxRework
   const acceptance = acceptanceOf(issue, marker)
   const ask = askOf(marker.ask)
   const rejected = history.filter((h) => h.reason)
+  const decide = isDecideSession(issue) && !issue.labels.includes(WHY.budget)
 
   const out = [
     `# Session brief: ${slug}#${issue.number}: ${issue.title}`,
     '',
-    `You are picking up ${issue.url} with a human in an interactive session. cambium, the scheduler, could not`,
-    `finish it on its own and moved it to the Human Queue (q:human, ${why}). Below is what cambium knows.`,
-    'Start by saying what you think went wrong and what you would try differently; do not repeat a rejected approach.',
+    ...(decide
+      ? [
+          `You are helping a human decide ${issue.url} in an interactive session. cambium, the scheduler, moved it to`,
+          `the Human Queue (q:human, ${why}) because it needs a decision only a person can make, one worth working`,
+          'through with the code. Below is what cambium knows.',
+          `Start by running \`${DECIDE_COMMAND}\`${ask?.lens ? ` (lens: ${ask.lens})` : ''}. Once decided, the human answers on the issue and cambium triages it again.`,
+        ]
+      : [
+          `You are picking up ${issue.url} with a human in an interactive session. cambium, the scheduler, could not`,
+          `finish it on its own and moved it to the Human Queue (q:human, ${why}). Below is what cambium knows.`,
+          'Start by saying what you think went wrong and what you would try differently; do not repeat a rejected approach.',
+        ]),
     '',
     '## Issue',
     '',
@@ -163,6 +188,7 @@ export function renderBrief({ slug, repoPath, issue, prs, maxAttempts, maxRework
         ...ask.options.map((o, i) => `${i + 1}. **${oneLine(o.label)}**: ${oneLine(o.detail)}`),
       )
     if (ask.recommendation) out.push('', `Recommendation: ${ask.recommendation}`)
+    if (ask.lens) out.push('', `Lens: ${ask.lens}`)
   }
   out.push(
     '',
