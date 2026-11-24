@@ -7,7 +7,7 @@
  */
 import { spawn } from 'node:child_process'
 import { parseMarker } from './marker.mjs'
-import { Q, QUEUE_LABELS } from './labels.mjs'
+import { Q, QUEUE_LABELS, RUNNING } from './labels.mjs'
 import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
 
 /**
@@ -52,9 +52,11 @@ import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
  * @typedef {{
  *   issues: Map<number, Issue>, prs: PullRequest[], release?: Release | null,
  *   base?: import('./base-health.mjs').BaseHealth,
- *   rateLimit?: { cost: number, remaining: number, resetAt: string } | null,
+ *   rateLimit?: { cost: number, remaining: number, resetAt: string } | null, unqueued?: Issue[],
  * }} Snapshot
  *   `rateLimit`: the GraphQL budget after the snapshot read (tick.mjs `read` pauses before it runs out).
+ *   `unqueued`: open issues in no queue and without a lease, oldest first, at most {@link UNQUEUED}; read while
+ *   `intake.adopt` is on, for adoption into `q:intake` (adopt.mjs). Not in `issues`.
  * @typedef {{ sha: string, behind: number, url: string | null }} GreenCommit
  *   `behind`: how many first-parent commits the ref's tip is past it. `url`: the green run.
  * @typedef {{
@@ -111,11 +113,15 @@ const PR_FIELDS = `number url headRefName state headRefOid isInMergeQueue body m
     ... on StatusContext { context state targetUrl description }
   } } } } } }`
 
+/** How many open issues in no queue one snapshot reads (oldest first): adoption takes them a page at a time. */
+export const UNQUEUED = 20
+
 /**
  * One query per repo per tick: the queued issues and the agent PRs with their checks; with `$release`, also the
  * promotion PRs and how far `$from` is ahead of `$to` (see {@link Release}).
  */
-export const SNAPSHOT_QUERY = `query($owner: String!, $name: String!, $labels: [String!], $release: Boolean!, $from: String!, $to: String!, $health: Boolean!, $baseRef: String!, $check: String!) {
+export const SNAPSHOT_QUERY = `query($owner: String!, $name: String!, $labels: [String!], $release: Boolean!, $from: String!, $to: String!, $health: Boolean!, $baseRef: String!, $check: String!, $adopt: Boolean!, $unqueued: String!) {
+  unqueued: search(query: $unqueued, type: ISSUE, first: ${UNQUEUED}) @include(if: $adopt) { nodes { ... on Issue { ...I } } }
   rateLimit { cost remaining resetAt }
   repository(owner: $owner, name: $name) {
     issues(labels: $labels, states: OPEN, first: 100, orderBy: { field: CREATED_AT, direction: ASC }) { pageInfo { hasNextPage endCursor } nodes { ...I } }
@@ -147,6 +153,19 @@ fragment P on PullRequest {
   labels(first: 30) { nodes { name } }
   comments(first: 100) { nodes { databaseId body author { login } } }
 }`
+
+/**
+ * The search for open issues in no queue and without a lease, oldest first, minus those carrying `ignore` labels.
+ * @param {string} slug @param {string[]} [ignore]
+ */
+export const unqueuedSearch = (slug, ignore = []) =>
+  [
+    `repo:${slug}`,
+    'is:issue',
+    'is:open',
+    ...[...QUEUE_LABELS, RUNNING, ...ignore].map((l) => `-label:"${l}"`),
+    'sort:created-asc',
+  ].join(' ')
 
 /** GitHub's closing keywords before a same-repo `#n` (graft's closing-refs.mjs, without cross-repo refs). */
 const CLOSING = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s+#(\d+)\b/gi
@@ -368,9 +387,15 @@ export function normalize(data, { botLogin = null, release = null, health = null
       updatedAt: p.updatedAt ?? null,
     })
   }
+  const unqueued = repo.unqueued
+    ? (repo.unqueued.nodes ?? [])
+        .filter((/** @type {any} */ n) => n?.number && !issues.has(n.number))
+        .map((/** @type {any} */ n) => toIssue(n, botLogin))
+    : null
   return {
     issues,
     prs,
+    ...(unqueued ? { unqueued } : {}),
     ...(release ? { release: normalizeRelease(repo, release, botLogin) } : {}),
     ...(health ? { base: baseHealthOf(repo, health) } : {}),
   }
@@ -435,6 +460,8 @@ export function graftGitHub({ config, exec: run = exec }) {
         health: Boolean(health),
         baseRef: health ? `refs/heads/${health.branch}` : '',
         check: health?.check ?? '',
+        adopt: config.intake.adopt,
+        unqueued: config.intake.adopt ? unqueuedSearch(slug, config.intake.ignoreLabels) : '',
       })
       const data = await json(graft(slug, ['graphql', SNAPSHOT_QUERY, '--vars', vars]))
       // More than 100 queued issues: follow the cursor, or the newest ones are never scheduled or watched.

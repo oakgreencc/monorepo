@@ -362,6 +362,9 @@ test('graft client: every call is one graft invocation, as the Clock App, in the
     health: true,
     baseRef: 'refs/heads/main',
     check: 'ci',
+    adopt: true,
+    unqueued:
+      'repo:o/r is:issue is:open -label:"q:intake" -label:"q:task" -label:"q:human" -label:"q:promote" -label:"running" sort:created-asc',
   })
   assert.deepEqual(argv.slice(1), [
     ['graphql', issuesQuery([6]), '--vars', JSON.stringify({ owner: 'o', name: 'r' }), '--repo', 'o/r'],
