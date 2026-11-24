@@ -15,6 +15,7 @@ One JSON file: `--config`, else `$CAMBIUM_CONFIG`, else `~/.cambium/config.json`
   "engine": "legacy",
   "tickSeconds": 30,
   "stepTimeoutSeconds": 20,
+  "fullReadEvery": 4,
   "repos": [{ "slug": "oakgreencc/monorepo", "path": "~/OGCC/monorepo", "baseBranch": "main" }],
   "phases": {
     "task": { "cap": 2, "wallClockMinutes": 60, "maxTurns": 200, "maxAttempts": 3, "maxReworks": 3 },
@@ -78,6 +79,7 @@ A file that does not load, or has no `repos`, keeps the running config and logs 
 | `engine`             | `"legacy"` | `"legacy"` (stage tick) or `"graph"`. Dispatch, release graphs, rescue, upkeep, red base and tracing need `"graph"`. |
 | `tickSeconds`        | `30`       | Interval between ticks.                                                                                   |
 | `stepTimeoutSeconds` | `20`       | Bound on each tick step; a step over it is logged and the tick moves on.                                  |
+| `fullReadEvery`      | `4`        | Ticks. A repo whose cheap probe shows no change reuses its last snapshot; every `fullReadEvery`th tick reads it in full anyway, since check results change no timestamp the probe sees. `1` reads in full every tick, without the probe. See [one tick](/explanation/architecture/#one-tick). |
 | `mergeQueueMinutes`  | `120`      | A submitted PR not merged after this long goes to `q:human` (`why:approve`).                              |
 | `mergeStallMinutes`  | `20`       | An agent PR with auto-merge armed and green checks that GitHub still reports `BLOCKED` this long after arming goes to `q:human` (`why:approve`), with GitHub's state in the reason. A rule cambium cannot read holds it: a ruleset review, an approval for unattributed changes, or a required check that never reported. `0` turns it off. |
 | `watchEveryMinutes`  | `5`        | How often each repo's [`watch`](#reposwatch) workflows are read. `0` turns watching off. |

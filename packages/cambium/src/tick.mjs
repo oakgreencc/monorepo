@@ -58,8 +58,9 @@ import { costDays, costOf, dayOf, overBudget, recordCost } from './cost.mjs'
  * @typedef {{ name: string, ok: boolean, ms: number, error: string | null }} StepResult
  * @typedef {{
  *   now: number, mode: import('./store.mjs').Mode, snaps: Map<string, Snapshot>,
- *   readErrors: Map<string, string>, touched: Set<string>, steps: StepResult[],
+ *   readErrors: Map<string, string>, touched: Set<string>, steps: StepResult[], reads: Map<string, ReadKind>,
  * }} Ctx
+ *   `reads`: per repo read this tick, whether it probed and reused the last snapshot or read it in full.
  */
 
 /**
@@ -77,6 +78,7 @@ export function newCtx(deps) {
     mode: deps.store.mode(),
     snaps: new Map(),
     readErrors: new Map(),
+    reads: new Map(),
     touched: new Set(),
     steps: [],
   }
@@ -200,6 +202,100 @@ export async function eachWorker(deps, ctx, workers, fn) {
 
 // ---- Read
 
+/**
+ * @typedef {'first' | 'config' | 'due' | 'pending' | 'changed' | 'probe-failed' | 'always'} FullReadWhy
+ *   Why a repo was read in full: no snapshot yet; its config changed; `fullReadEvery` reached; an open PR's
+ *   checks, merge queue or `mergeable` are still settling (none bumps `updatedAt`); the probe differs; the probe
+ *   failed; no probe at all (`fullReadEvery` 1, or a GitHub without one).
+ * @typedef {{ kind: 'probe', why: null } | { kind: 'full', why: FullReadWhy }} ReadKind
+ * @typedef {{ snap: Snapshot, probe: import('./github.mjs').Probe, key: string, reused: number }} CachedRead
+ *   `reused`: ticks the snapshot has been reused since it was read. `key`: the config it was read under.
+ */
+
+/** The last full read per repo, per daemon (its `deps`): tick to tick, never persisted. @type {WeakMap<Deps, Map<string, CachedRead>>} */
+const READS = new WeakMap()
+
+/** @param {Deps} deps */
+const readsOf = (deps) => {
+  const m = READS.get(deps) ?? new Map()
+  READS.set(deps, m)
+  return m
+}
+
+/** What the snapshot read depends on in the config: a change reads afresh. @param {Deps} deps @param {string} slug */
+const readKey = (deps, slug) =>
+  JSON.stringify([deps.config.repos.find((r) => r.slug === slug), deps.config.intake, deps.config.graft.botLogin])
+
+/**
+ * An open PR whose state may change with no `updatedAt` to show it: checks running, in the merge queue, or
+ * `mergeable` still being computed.
+ * @param {Snapshot} snap
+ */
+export const settling = (snap) =>
+  snap.prs.some(
+    (p) =>
+      p.state === 'OPEN' &&
+      (p.checks === 'PENDING' || p.checks === 'EXPECTED' || p.inMergeQueue || p.mergeable === 'UNKNOWN'),
+  )
+
+/**
+ * Whether the repo must be read in full this tick, before probing: the reason, or null (the probe decides).
+ * @param {CachedRead | undefined} cached @param {string} key @param {number} every
+ * @returns {FullReadWhy | null}
+ */
+export function fullReadDue(cached, key, every) {
+  if (!cached) return 'first'
+  if (cached.key !== key) return 'config'
+  if (cached.reused + 1 >= every) return 'due'
+  if (settling(cached.snap)) return 'pending'
+  return null
+}
+
+/** @param {import('./github.mjs').Probe} a @param {import('./github.mjs').Probe} b */
+const sameProbe = (a, b) =>
+  a.issuesAt === b.issuesAt && a.prsAt === b.prsAt && JSON.stringify(a.heads) === JSON.stringify(b.heads)
+
+/**
+ * One repo's snapshot. With a probe (`github.probe`, `fullReadEvery` > 1): probe first, then reuse the last full
+ * read when nothing it reads has changed ({@link fullReadDue}). The probe runs before a full read too, so the
+ * snapshot is never older than the probe it is compared by: a change between the two only costs a read.
+ * @param {Deps} deps @param {Ctx} ctx @param {string} slug @returns {Promise<Snapshot>}
+ */
+async function readRepo(deps, ctx, slug) {
+  const every = deps.config.fullReadEvery ?? 1
+  const cache = readsOf(deps)
+  const full = async (/** @type {FullReadWhy} */ why, /** @type {import('./github.mjs').Probe | null} */ probe) => {
+    cache.delete(slug)
+    const snap = await deps.github.read(slug)
+    if (probe) cache.set(slug, { snap: structuredClone(snap), probe, key: readKey(deps, slug), reused: 0 })
+    ctx.reads.set(slug, { kind: 'full', why })
+    return snap
+  }
+  if (!deps.github.probe || every <= 1) return full('always', null)
+  const cached = cache.get(slug)
+  const key = readKey(deps, slug)
+  /** @type {import('./github.mjs').Probe} */
+  let probe
+  try {
+    probe = await deps.github.probe(slug)
+  } catch (err) {
+    deps.log('warn', `probe: ${/** @type {Error} */ (err)?.message ?? err}; reading in full`, { repo: slug })
+    return full('probe-failed', null)
+  }
+  const due = fullReadDue(cached, key, every)
+  if (due) return full(due, probe)
+  const was = /** @type {CachedRead} */ (cached)
+  if (!sameProbe(was.probe, probe)) return full('changed', probe)
+  was.reused++
+  ctx.reads.set(slug, { kind: 'probe', why: null })
+  // The budget now, at the full read's cost: the pause below still allows for the next full read.
+  const rl = probe.rateLimit
+  const rateLimit = rl
+    ? { ...rl, cost: Math.max(rl.cost, was.snap.rateLimit?.cost ?? 0) }
+    : (was.snap.rateLimit ?? null)
+  return { ...structuredClone(was.snap), rateLimit }
+}
+
 /** @param {Deps} deps @param {Ctx} ctx */
 async function read(deps, ctx) {
   let skipped = 0
@@ -217,7 +313,7 @@ async function read(deps, ctx) {
       deps.log('warn', `${why}; reads paused until ${iso(at)}`, where)
     }
     try {
-      const snap = await deps.github.read(repo.slug)
+      const snap = await readRepo(deps, ctx, repo.slug)
       ctx.snaps.set(repo.slug, snap)
       // Stop one read short of the wall: the budget left must cover this read and a margin for workers' calls.
       const rl = snap.rateLimit
@@ -714,7 +810,7 @@ async function release(deps, ctx) {
  *   counts: Counts & { workers: number },
  *   caps: { task: number, dispatch: number },
  *   repos: {
- *     slug: string, ok: boolean, error: string | null, counts: Counts | null,
+ *     slug: string, ok: boolean, error: string | null, read: ReadKind | null, counts: Counts | null,
  *     base: import('./base-health.mjs').BaseHealth | null,
  *     watch: import('./watch.mjs').WatchState[],
  *     rateLimit: { cost: number, remaining: number, resetAt: string } | null,
@@ -810,6 +906,7 @@ export function heartbeatState(deps, ctx) {
       slug: r.slug,
       ok: Boolean(snap),
       error: ctx.readErrors.get(r.slug) ?? null,
+      read: ctx.reads.get(r.slug) ?? null,
       counts: snap ? countsOf(snap) : null,
       base: snap?.base ?? null,
       watch: watchStates(deps, r.slug),
