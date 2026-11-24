@@ -111,9 +111,17 @@ test('the brief is deleted when the issue closes', async (t) => {
   assert.equal(existsSync(s.path), false)
 })
 
-test('ask fields appear when the marker has them', () => {
+test('ask fields appear when the marker has them; decide options render as `N. **label**: detail` (#163)', () => {
   const base = { slug: SLUG, repoPath: '/repo', prs: [], maxAttempts: 3, maxReworks: 3 }
-  const ask = { question: 'Which parser?', options: ['regex', 'peg'], recommendation: 'peg' }
+  const ask = {
+    kind: 'decide',
+    question: 'Which parser?',
+    options: [
+      { label: 'regex', detail: 'quick to write,\nfragile on nesting' },
+      { label: 'peg', detail: 'a grammar file and a dependency' },
+    ],
+    recommendation: 'peg',
+  }
   const i = /** @type {any} */ ({
     number: 5,
     title: 'T',
@@ -125,7 +133,12 @@ test('ask fields appear when the marker has them', () => {
   })
   const brief = renderBrief({ ...base, issue: i })
   assert.ok(brief.includes('## The question\n\nWhich parser?'))
-  assert.ok(brief.includes('1. regex\n2. peg'))
+  assert.ok(
+    brief.includes(
+      'Options:\n\n1. **regex**: quick to write, fragile on nesting\n2. **peg**: a grammar file and a dependency\n',
+    ),
+  )
+  assert.ok(!brief.includes('[object Object]'))
   assert.ok(brief.includes('Recommendation: peg'))
 })
 
