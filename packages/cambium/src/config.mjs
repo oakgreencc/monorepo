@@ -47,6 +47,7 @@ import { join, resolve } from 'node:path'
  *   engine: 'legacy' | 'graph',
  *   tickSeconds: number,
  *   stepTimeoutSeconds: number,
+ *   fullReadEvery: number,
  *   repos: Repo[],
  *   phases: {
  *     task: TaskCaps, dispatch: PhaseCaps & { maxRounds: number, deferHours: number, maxDefers: number },
@@ -70,6 +71,8 @@ import { join, resolve } from 'node:path'
  *   gc: GcConfig,
  *   costFlagUsd: number,
  * }} Config
+ *   `fullReadEvery`: a repo whose probe shows no change reuses its last snapshot, but at most `fullReadEvery - 1`
+ *   ticks running: every `fullReadEvery`th tick reads it in full regardless (tick.mjs `read`). 1: always read.
  *   `mergeStallMinutes`: an agent PR whose auto-merge has been armed this long, with green checks, while GitHub
  *   still reports it BLOCKED (a rule cambium cannot see holds it) goes to `q:human` with GitHub's state. 0: off.
  *   `watchEveryMinutes`: how often each repo's `watch` workflows are read (watch.mjs).
@@ -109,6 +112,7 @@ export function defaults(home = DEFAULT_HOME) {
     engine: 'legacy',
     tickSeconds: 30,
     stepTimeoutSeconds: 20,
+    fullReadEvery: 4,
     repos: [],
     phases: {
       task: { cap: 2, wallClockMinutes: 60, maxTurns: 200, maxAttempts: 3, maxReworks: 3 },
@@ -273,6 +277,10 @@ export function resolveConfig(raw = {}) {
   for (const k of /** @type {const} */ (['mergeStallMinutes', 'watchEveryMinutes']))
     if (!(typeof config[k] === 'number' && config[k] >= 0))
       throw new Error(`config: ${k} must be a number, at least 0, got ${JSON.stringify(config[k])}`)
+  if (!(Number.isInteger(config.fullReadEvery) && config.fullReadEvery >= 1))
+    throw new Error(
+      `config: fullReadEvery must be a whole number of ticks, at least 1, got ${JSON.stringify(config.fullReadEvery)}`,
+    )
   if (!MERGE_POLICIES.includes(config.merge))
     throw new Error(`config: merge must be "none" or "green", got ${JSON.stringify(config.merge)}`)
   const wenv = config.worker.env
