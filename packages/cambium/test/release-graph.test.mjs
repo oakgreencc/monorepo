@@ -238,6 +238,7 @@ test('config: per-repo release defaults to the top-level one, from the base bran
     from: 'develop',
     to: 'main',
     check: 'ci',
+    signal: 'merged',
   })
   assert.deepEqual(c.repos[1].release, {
     enabled: false,
@@ -246,6 +247,7 @@ test('config: per-repo release defaults to the top-level one, from the base bran
     from: 'main',
     to: 'prod',
     check: 'ci',
+    signal: 'merged',
   })
   const d = resolveConfig({
     repos: [
