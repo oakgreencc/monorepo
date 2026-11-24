@@ -51,6 +51,7 @@ One JSON file: `--config`, else `$CAMBIUM_CONFIG`, else `~/.cambium/config.json`
     "db": "~/.cambium/cambium.db",
     "heartbeat": "~/.cambium/state.json",
     "queues": "~/.cambium/queues.json",
+    "snapshots": "~/.cambium/snapshots.json",
     "logs": "~/.cambium/logs"
   },
   "logs": { "keepPerIssue": 20, "daemonMaxBytes": 10485760 },
@@ -200,6 +201,7 @@ GC skips the checkout itself, worker worktrees and locked worktrees (a Claude Co
 | `paths.db`             | `<home>/cambium.db`      | SQLite store: workers, mode, the daily cost ledger.     |
 | `paths.heartbeat`      | `<home>/state.json`      | [Heartbeat](/reference/cambium/heartbeat/) file.        |
 | `paths.queues`         | `<home>/queues.json`     | [Queue view](/reference/cambium/heartbeat/#queue-view-queuesjson) canopy reads. |
+| `paths.snapshots`      | `<home>/snapshots.json`  | [Snapshots](/reference/cambium/heartbeat/#snapshots-snapshotsjson) `run --follow` reads. |
 | `paths.logs`           | `<home>/logs`            | Daemon and worker logs.                                 |
 | `logs.keepPerIssue`    | `20`                     | Worker runs kept per issue.                             |
 | `logs.daemonMaxBytes`  | `10485760`               | Daemon log rotation size.                               |

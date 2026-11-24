@@ -108,6 +108,21 @@ Written every tick, after the other steps and before the heartbeat, to `paths.qu
 
 canopy treats the file as stale once `writtenAt` is more than 3 × `tickSeconds` old, and then reads GitHub itself.
 
+## Snapshots (`snapshots.json`)
+
+Written every tick, after the queue view and before the heartbeat, to `paths.snapshots` (default `~/.cambium/snapshots.json`), whole and renamed into place. It holds each repo's full snapshot, as the tick left it. `cambium run … --follow` reads it while the daemon is live. Its write is the `snapshots` step.
+
+| Field         | Meaning                                                                 |
+| ------------- | ----------------------------------------------------------------------- |
+| `version`     | `1`. A follower reads no other.                                         |
+| `writtenAt`   | When it was written.                                                    |
+| `tickSeconds` | `config.tickSeconds`.                                                   |
+| `repos`       | Per repo: `{ slug, ok, error, fetchedAt, snapshot }`.                   |
+
+- `fetchedAt`: when the tick that read the snapshot started.
+- `snapshot`: the snapshot cambium read, with `issues` as an array.
+- A repo not read this tick has `ok: false`, the `error`, and `snapshot: null`. An old snapshot is never kept.
+
 ## `cambium status --json`
 
 Returns `{ "mode", "heartbeat" }`. The mode comes from the SQLite database, so it is available while the daemon is down. Exit 1 when the heartbeat is missing or older than 3 ticks.

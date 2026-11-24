@@ -7,6 +7,7 @@ import { gcRunner } from './gc.mjs'
 import { graftGitHub } from './github.mjs'
 import { openStore } from './store.mjs'
 import { QUEUES_VERSION, writeQueues } from './queue-view.mjs'
+import { daemonFeed, readSnapshots, writeSnapshots } from './snapshot-file.mjs'
 import { tick } from './tick.mjs'
 import { autoUpdate, realUpdater } from './update.mjs'
 import { processSpawner, realProcs } from './workers.mjs'
@@ -117,6 +118,12 @@ export function realDeps(config, { echo } = {}) {
         lastQueues = view
       },
     },
+    snapshots: { write: (file) => writeSnapshots(config.paths.snapshots, file) },
+    daemonFeed: daemonFeed({
+      readHeartbeat: () => readHeartbeat(config.paths.heartbeat),
+      readSnapshots: () => readSnapshots(config.paths.snapshots),
+      now: Date.now,
+    }),
     daemonStartedAt: Date.now(),
     pid: process.pid,
     updater: realUpdater(),
