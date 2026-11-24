@@ -101,9 +101,11 @@ import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
  *   closedPulls(slug: string): Promise<PullRequest[]>,
  *   readIssues(slug: string, numbers: number[]): Promise<Map<number, Issue>>,
  *   workflowRuns(slug: string, workflow: string, branch: string): Promise<import('./watch.mjs').WorkflowRun[]>,
+ *   mergeCommit(slug: string, number: number): Promise<string | null>,
  * }} GitHub
  *   `workflowRuns`: the newest completed push or schedule runs of `workflow` (file name or id) on `branch`, newest
- *   first (watch.mjs).
+ *   first (watch.mjs). `mergeCommit`: the commit a merged PR made on its base (null: not merged), for a workflow
+ *   promotion signal (promotion.mjs).
  *   `greenCommit`: the newest commit on `ref`'s first-parent line, at most `depth` back, whose `check` concluded
  *   success (`check` null: the tip). `compareRange`: GitHub's compare of `base...head`. `branches`: the branch
  *   names starting with `prefix`. `createBranch`: a new branch at `sha`.
@@ -725,6 +727,10 @@ export function graftGitHub({ config, exec: run = exec, now = Date.now }) {
           conclusion: String(r.conclusion ?? ''),
           at: r.updated_at ?? r.created_at,
         }))
+    },
+    async mergeCommit(slug, number) {
+      const pr = await json(graft(slug, ['api', 'GET', `/repos/${slug}/pulls/${number}`]))
+      return pr?.merged_at && pr.merge_commit_sha ? String(pr.merge_commit_sha) : null
     },
     async linkIssue(slug, pr, issue) {
       const path = `/repos/${slug}/pulls/${pr}`

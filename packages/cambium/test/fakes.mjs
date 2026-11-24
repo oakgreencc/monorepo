@@ -186,6 +186,11 @@ export function fakeGitHub({ issues = [], prs = [] } = {}) {
       if (faults.runsError) throw faults.runsError
       return [...(runs.get(`${workflow}@${branch}`) ?? [])]
     },
+    async mergeCommit(slug, number) {
+      calls.push({ op: 'mergeCommit', args: [slug, number] })
+      const p = pulls.find((x) => x.number === number)
+      return p?.state === 'MERGED' ? `merge-${number}` : null
+    },
     async behindBase(slug, number) {
       calls.push({ op: 'behindBase', args: [slug, number] })
       const p = /** @type {any} */ (pulls.find((x) => x.number === number))
