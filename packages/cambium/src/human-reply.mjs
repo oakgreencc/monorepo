@@ -49,6 +49,13 @@ export function parseAnswer(body) {
 }
 
 /**
+ * The answer marker for a decision `answerer` made, as {@link parseAnswer} reads it. `--` would end the HTML
+ * comment early, so it is written as a JSON escape.
+ * @param {Answer} a
+ */
+export const renderAnswerMarker = (a) => `<!-- cambium:answer ${JSON.stringify(a).replace(/--/g, '-\\u002d')} -->`
+
+/**
  * Whether `c` is a reply rather than cambium talking to itself, regardless of time: never a comment carrying a state
  * marker or a `cambium:decide` marker; an answer comment always; otherwise a human's (an author, not a `Bot`, not one of `self`).
  * @param {Comment} c @param {Set<string | null | undefined>} self

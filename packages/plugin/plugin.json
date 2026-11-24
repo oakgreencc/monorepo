@@ -1,10 +1,10 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "oakgreen",
-  "version": "0.1.0",
-  "description": "Set up the oakgreen stack on this machine: a guided wizard over the oakgreen CLI for graft, cambium, tracing, mycelium, canopy, canker and deadwood.",
+  "version": "0.2.0",
+  "description": "Set up the oakgreen stack on this machine, and work cambium's Human Queue decisions from Claude Code: a guided setup wizard over the oakgreen CLI, and /oakgreen:decide, which walks a person to a decision through cambium's decide graph.",
   "author": { "name": "oakgreencc", "url": "https://github.com/oakgreencc" },
-  "keywords": ["oakgreen", "cambium", "graft", "mycelium", "canopy", "canker", "deadwood", "otel", "setup"],
+  "keywords": ["oakgreen", "cambium", "graft", "mycelium", "canopy", "canker", "deadwood", "otel", "setup", "decide"],
   "homepage": "https://github.com/oakgreencc/monorepo/tree/main/packages/plugin#readme",
   "repository": "https://github.com/oakgreencc/monorepo",
   "license": "AGPL-3.0-only"

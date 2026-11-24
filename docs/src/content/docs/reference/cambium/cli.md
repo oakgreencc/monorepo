@@ -35,6 +35,15 @@ The mode is stored in the SQLite database (`paths.db`, table `control`).
 
 `run task`, `run pr` and `run dispatch` stop at the first wait that is not ready. `--follow` re-reads and polls every `tickSeconds` until the graph ends (for `run pr`, until the issue is closed). Beside a live daemon (heartbeat less than 3 ticks old), `--follow` reads the daemon's [snapshots file](/reference/cambium/heartbeat/#snapshots-snapshotsjson) instead of GitHub, waiting for each tick's new snapshot. With no daemon, a stale heartbeat, or a missing or unreadable file, it reads GitHub itself every `tickSeconds`. It also reads GitHub when the daemon has not read the repo for 3 ticks. Without `--follow`, `run` always reads GitHub.
 
+## Decisions
+
+| Command | Behaviour |
+| --- | --- |
+| `cambium decide show <o/n#n> [--json] [--lens <l>]` | Where the issue's decision stands, from its `cambium:decide` marker (or the start, seeded from its ask), and what the next step needs. `--json` prints the state. |
+| `cambium decide advance <o/n#n> --output <file\|-> [--as <login>] [--lens <l>]` | Check one step's output (JSON, `-` reads stdin) against the current step's schema. A bad output is refused with every problem listed, exit 1, and nothing changes. A good one runs the step, writes the marker and prints the next step. |
+
+`--as` names the person deciding (default `$GITHUB_USER`, then `$USER`); the answer comment credits them. `--lens` (`product` or `technical`) is needed only when the issue's ask has none. The `/oakgreen:decide` command in the oakgreen plugin runs these for you: see [Answer the human queue](/how-to/answer-the-human-queue/#decide-in-a-session).
+
 ## Maintenance
 
 | Command                                    | Behaviour                                                                                                                                                                       |

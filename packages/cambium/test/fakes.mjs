@@ -7,6 +7,7 @@
 import { resolveConfig } from '../src/config.mjs'
 import { resolveConvention } from '../src/convention.mjs'
 import { parseDecideMarker } from '../src/graphs/decide.mjs'
+import { parseAnswer } from '../src/human-reply.mjs'
 import { parseMarker } from '../src/marker.mjs'
 import { openStore } from '../src/store.mjs'
 
@@ -171,8 +172,10 @@ export function fakeGitHub({ issues = [], prs = [] } = {}) {
     async writeState(slug, number, commentId, body) {
       calls.push({ op: 'writeState', args: [slug, number, commentId, body] })
       const i = /** @type {Required<FakeIssue>} */ (store.get(number))
-      if (parseDecideMarker(body)) {
-        if (crash.decideWrite) {
+      // A decide marker or an answer is an ordinary comment of cambium's, not the state comment.
+      if (parseDecideMarker(body) || parseAnswer(body)) {
+        if (commentId && !i.comments.some((c) => c.id === commentId)) throw new Error(`no comment ${commentId}`)
+        if (parseDecideMarker(body) && crash.decideWrite) {
           const err = crash.decideWrite
           crash.decideWrite = null
           throw err

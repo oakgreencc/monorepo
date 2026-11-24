@@ -99,6 +99,9 @@ importers:
 
   packages/plugin:
     devDependencies:
+      '@oakgreencc/cambium':
+        specifier: workspace:*
+        version: link:../cambium
       oakgreen:
         specifier: workspace:*
         version: link:../oakgreen

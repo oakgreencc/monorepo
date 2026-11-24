@@ -34,9 +34,9 @@ export const IDLE_MS = 24 * 60 * 60 * 1000
 
 // ---- schemas: the state is the union of these, carried whole in the marker ----
 
-const Fact = z.object({ claim: z.string(), source: z.string() }) // source: file:line, URL, API route
-const Option = z.object({ label: z.string(), detail: z.string(), cost: z.string() })
-const Question = z.object({
+export const Fact = z.object({ claim: z.string(), source: z.string() }) // source: file:line, URL, API route
+export const Option = z.object({ label: z.string(), detail: z.string(), cost: z.string() })
+export const Question = z.object({
   id: z.string(),
   title: z.string(),
   text: z.string(),
@@ -44,7 +44,7 @@ const Question = z.object({
   rec: z.string(), // worded so "yes" accepts
 })
 const Round = z.object({ n: z.number(), questions: z.array(Question).min(1).max(5) })
-const Answer = z.object({ id: z.string(), text: z.string() })
+export const Answer = z.object({ id: z.string(), text: z.string() })
 const Reply = z.object({
   author: z.string(),
   at: z.string(),
@@ -54,7 +54,7 @@ const Reply = z.object({
 })
 /** Where a channel's replies were last consumed up to: the reply's author, time and channel id (if it has one). */
 const Cursor = z.object({ author: z.string(), at: z.string(), id: z.string().nullable() })
-const Decision = z.object({
+export const Decision = z.object({
   choice: z.string(),
   inScope: z.array(z.string()),
   outOfScope: z.array(z.string()),

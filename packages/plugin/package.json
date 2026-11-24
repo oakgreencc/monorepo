@@ -1,8 +1,8 @@
 {
   "name": "@oakgreencc/plugin",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "The oakgreen agent plugin: a guided setup skill for the oakgreen stack, packaged for Claude Code and Kiro.",
+  "description": "The oakgreen agent plugin: a guided setup skill for the oakgreen stack and the /oakgreen:decide decision skill, packaged for Claude Code and Kiro.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -13,10 +13,12 @@
     "name": "plugin"
   },
   "devDependencies": {
-    "oakgreen": "workspace:*"
+    "oakgreen": "workspace:*",
+    "@oakgreencc/cambium": "workspace:*"
   },
   "files": [
     ".claude-plugin/",
+    "commands/",
     "plugin.json",
     "skills/"
   ]
