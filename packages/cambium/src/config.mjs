@@ -51,6 +51,7 @@ import { join, resolve } from 'node:path'
  *   release: { enabled: boolean, time: string },
  *   reaper: { everyMinutes: number, staleMinutes: number, orphanDays: number },
  *   retriage: { enabled: boolean, time: string, maxSkipDays: number },
+ *   intake: { adopt: boolean, ignoreLabels: string[] },
  *   rescue: RescueConfig,
  *   paths: { home: string, db: string, heartbeat: string, logs: string },
  *   logs: { keepPerIssue: number, daemonMaxBytes: number },
@@ -63,6 +64,9 @@ import { join, resolve } from 'node:path'
  *   `mergeStallMinutes`: an agent PR whose auto-merge has been armed this long, with green checks, while GitHub
  *   still reports it BLOCKED (a rule cambium cannot see holds it) goes to `q:human` with GitHub's state. 0: off.
  *   `watchEveryMinutes`: how often each repo's `watch` workflows are read (watch.mjs).
+ *   `intake.adopt`: an open issue in no queue that cambium has never touched (no state comment, no agent PR naming
+ *   it) is labelled `q:intake`, so an issue filed without the label is triaged instead of ignored (adopt.mjs).
+ *   `intake.ignoreLabels`: issues with any of these labels are left alone (tracking or parent issues, say).
  *   `costFlagUsd`: an issue whose task-phase spend (cost.mjs) is over this many US dollars with no merged PR is
  *   flagged in the heartbeat, and canopy's Inbox, as a session candidate. 0 turns the flag off.
  * @typedef {{
@@ -114,6 +118,7 @@ export function defaults(home = DEFAULT_HOME) {
     release: { enabled: false, time: '06:00' },
     reaper: { everyMinutes: 60, staleMinutes: 30, orphanDays: 3 },
     retriage: { enabled: false, time: '05:00', maxSkipDays: 14 },
+    intake: { adopt: true, ignoreLabels: [] },
     rescue: { everyMinutes: 60, staleHours: 12, graceMinutes: 30, cooldownHours: 24, maxRescues: 2, causeRepo: null },
     paths: {
       home,
@@ -211,6 +216,9 @@ export function resolveConfig(raw = {}) {
   if (!/^\d{2}:\d{2}$/.test(config.retriage.time)) throw new Error(`config: retriage.time must be HH:MM`)
   if (typeof config.retriage.maxSkipDays !== 'number' || !(config.retriage.maxSkipDays >= 0))
     throw new Error(`config: retriage.maxSkipDays must be a number of days ≥ 0`)
+  if (typeof config.intake.adopt !== 'boolean') throw new Error(`config: intake.adopt must be true or false`)
+  if (!Array.isArray(config.intake.ignoreLabels) || config.intake.ignoreLabels.some((l) => typeof l !== 'string'))
+    throw new Error(`config: intake.ignoreLabels must be a list of label names`)
   config.repos = (config.repos ?? []).map((r) => {
     if (!r?.slug || !/^[^/\s]+\/[^/\s]+$/.test(r.slug))
       throw new Error(`config: repo slug must be owner/name, got ${r?.slug}`)

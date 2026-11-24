@@ -316,7 +316,7 @@ test('wait:blocked with a human reply: triaged whatever its open blockers; block
         }),
         comments: [comment('alice', T0 - MIN, 'It does not need #3: the old API works.')],
       },
-      { number: 3, labels: [] },
+      { number: 3, labels: ['q:task'] }, // a blocker sits in a queue of its own
     ],
   })
   await tick(h.deps)

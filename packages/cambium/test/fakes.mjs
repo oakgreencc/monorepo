@@ -112,8 +112,15 @@ export function fakeGitHub({ issues = [], prs = [] } = {}) {
       const repairs = [...store.values()]
         .filter((i) => i.state === 'OPEN' && i.labels.includes('red-base'))
         .map((i) => i.number)
+      // The search the real read makes while `intake.adopt` is on: open, in no queue, no lease, oldest first.
+      const unqueued = [...store.values()]
+        .filter((i) => i.state === 'OPEN' && !issuesOut.has(i.number))
+        .filter((i) => !i.labels.some((l) => l.startsWith('q:') || l === 'running'))
+        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+        .map(toIssue)
       return {
         issues: issuesOut,
+        unqueued,
         prs: pulls.map((p) => ({ ...p, closes: [...p.closes], failing: [...p.failing] })),
         ...(health.base ? { base: { ...health.base, suspects: [...health.base.suspects], repairs } } : {}),
         rateLimit: health.rateLimit,

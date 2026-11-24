@@ -19,6 +19,12 @@ At most one `q:` label sits on an open issue. Alongside it:
 
 Anyone can read this. A person browsing GitHub, canopy, a script — all see the same queue without an API in between. A person can move an issue by relabelling it and cambium follows on its next tick.
 
+## No issue goes unseen
+
+An issue filed without a `q:` label would sit outside every queue, and nothing would ever look at it. So cambium adopts it: an open issue in no queue that cambium has never handled gains `q:intake`, and triage decides what it is. Forgetting the label costs one tick.
+
+Adoption skips what is already accounted for: an issue with cambium's state comment, one an agent PR names, one cambium filed itself, and labels listed in `intake.ignoreLabels`. Turning it off (`intake.adopt: false`) brings back the old rule, where the label is the only way in.
+
 ## Only cambium moves labels
 
 Readable by all, writable by one. Workers have `graft issue label` and `graft issue edit` denied: an agent finishing its task cannot declare itself done, skip review, or move a sibling issue. Every queue transition is a decision cambium makes from what it observes — a PR exists, CI is green, the worker exited — not a claim the worker makes about itself.
