@@ -171,6 +171,7 @@ Verdicts:
   - \`kind\`: \`decide\` (a choice only a person can make), \`verify\` (a check only a person can make: a physical device, an account no machine can reach), \`chore\` (offline work: a store listing, paperwork, a console setting) or \`approve\` (a yes or no on something already written).
   - \`question\`: the one question, answerable in a comment. For \`decide\`, \`options\` (two or more, each a \`label\` and the tradeoff in \`detail\`) and, where you have one, \`recommendation\`.
   - \`interactive\`: true only when a live session with the code would help the person answer (a design choice to explore); false for chores, checks and plain choices.
+  - \`lens\`: required for a \`decide\` with \`interactive\` true, which kind of decision it is (the session frames it by this): \`product\` when the choice is about what users get (scope, behaviour, wording, defaults, priority), \`technical\` when it is about how it is built (architecture, interfaces, dependencies, data model, tooling). When it is both, pick the one the options differ on most. Omit it otherwise.
   If the issue waits on another open issue that is itself a human chore or check, it is blocked by that issue, not needs-human: do not ask again what that issue already asks.
 - duplicate: the same work as another issue, open or closed. \`duplicateOf\` is that issue's number (never #${issue.number}); \`reason\` says why they are the same.
 - obsolete: the work no longer applies, and you verified it: the code path is gone, the bug is already fixed on ${baseBranch}, or its verification already passed. cambium closes it as not planned. \`reason\` gives the evidence (commit, file, run).
@@ -187,9 +188,9 @@ How to look:
 
 End your final message with exactly one fenced JSON block, and nothing after it:
 \`\`\`json
-{ "verdict": "actionable" | "needs-human" | "duplicate" | "obsolete" | "defer" | "blocked", "duplicateOf": 123, "blockedBy": [124], "recheckHours": 6, "reason": "…", "title": "…", "acceptance": ["…"], "ask": { "kind": "decide" | "verify" | "chore" | "approve", "question": "…", "options": [{ "label": "…", "detail": "…" }], "recommendation": "…", "interactive": false } }
+{ "verdict": "actionable" | "needs-human" | "duplicate" | "obsolete" | "defer" | "blocked", "duplicateOf": 123, "blockedBy": [124], "recheckHours": 6, "reason": "…", "title": "…", "acceptance": ["…"], "ask": { "kind": "decide" | "verify" | "chore" | "approve", "question": "…", "options": [{ "label": "…", "detail": "…" }], "recommendation": "…", "interactive": false, "lens": "product" | "technical" } }
 \`\`\`
-\`duplicateOf\` only for duplicate; \`blockedBy\` only for blocked; \`recheckHours\` only for defer, and optional; \`title\` and \`acceptance\` only for actionable, and optional; \`ask\` only for needs-human (\`options\` only for decide, \`recommendation\` optional). A missing or malformed block sends the issue to a human with the error.
+\`duplicateOf\` only for duplicate; \`blockedBy\` only for blocked; \`recheckHours\` only for defer, and optional; \`title\` and \`acceptance\` only for actionable, and optional; \`ask\` only for needs-human (\`options\` only for decide, \`recommendation\` optional, \`lens\` only for an interactive decide). A missing or malformed block sends the issue to a human with the error.
 ${deferred ? `\nThis is re-triage ${deferred.count + 1}: an earlier triage deferred it to check this:\n${deferred.reason}\nCheck it now. If it still cannot be checked, defer again.\n` : ''}${blocked ? `\nAn earlier triage found it blocked by ${blocked.by.map((n) => `#${n}`).join(', ')}, now closed:\n${blocked.reason}\nJudge it again now that they are done.\n` : ''}${replied ? repliedNote(replied) : ''}${others ? `\nOther issues in cambium's queues right now:\n${others}\n` : ''}
 --- Issue #${issue.number}: ${issue.title} (${issue.url})
 ${issue.body}
