@@ -17,6 +17,7 @@ All graphs run with `"engine": "graph"`. Steps act once; waits hold until polled
 | Sweep      | A `running` lease with this host (or none) and no tracked worker goes to its node's recovery.         |
 | Adopt      | An open issue in no queue that cambium has never handled, and no agent PR names, gains `q:intake`. |
 | Schedule   | Starts Task workers by priority then age up to `phases.task.cap`; wakes replied-to issues; starts triage up to `phases.dispatch.cap`. |
+| Decide     | One turn of every hosted decision, in repos with `decide.channel` ([configuration](/reference/cambium/configuration/#decide)). |
 | Release    | [Release graphs](#release-prepare) per repo.                                                          |
 | Stalls     | Warns once about each [stalled](#stalled-merges) PR that is not an agent's.                           |
 | Upkeep     | Reaper, [stall](#stall) fallback, then the [rescue](#rescue) sweep.                                   |

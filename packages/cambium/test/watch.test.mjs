@@ -61,7 +61,7 @@ test('config: a repo’s phases override wallClockMinutes and maxTurns, and noth
   const bad = (/** @type {any} */ phases) => () =>
     resolveConfig({ ...base, repos: [{ slug: SLUG, path: '/r', phases }] })
   assert.throws(bad({ task: { cap: 5 } }), /a repo may set wallClockMinutes, maxTurns/)
-  assert.throws(bad({ build: { maxTurns: 5 } }), /the phases are task, dispatch and rescue/)
+  assert.throws(bad({ build: { maxTurns: 5 } }), /the phases are task, dispatch, rescue and decide/)
   assert.throws(bad({ task: { wallClockMinutes: 0 } }), /above 0/)
 })
 

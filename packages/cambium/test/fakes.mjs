@@ -67,6 +67,24 @@ export function fakeGitHub({ issues = [], prs = [] } = {}) {
   /** @type {{ op: string, args: any[] }[]} */
   const calls = []
   let nextComment = 1000
+  /** When set, the next `writeState` of a `cambium:decide` marker throws it (once): a crash before the write. @type {{ decideWrite: Error | null }} */
+  const crash = { decideWrite: null }
+  /** The time new comments are created at (tests that post comments set it to their clock). */
+  const commentClock = { now: () => T0 }
+  /** cambium's own comments: a decide marker is a comment of its own, as on GitHub (the state comment is apart). */
+  const own = (/** @type {Required<FakeIssue>} */ i, /** @type {number | null} */ id, /** @type {string} */ body) => {
+    const c = i.comments.find((x) => x.id === id)
+    if (c) c.body = body
+    else
+      i.comments.push({
+        id: id ?? nextComment++,
+        author: 'cambium[bot]',
+        bot: true,
+        createdAt: new Date(commentClock.now()).toISOString(),
+        body,
+      })
+    return /** @type {number} */ (c?.id ?? i.comments.at(-1)?.id)
+  }
   /**
    * `missingLabels`: labels the repo lacks; adding one is refused as graft refuses it.
    * @type {{ readError: Error | null, labelError: Error | null, hang: boolean, mergeError: Error | null, updateError: Error | null, runsError: Error | null, rulesError: Error | null, missingLabels: Set<string> }}
@@ -153,6 +171,14 @@ export function fakeGitHub({ issues = [], prs = [] } = {}) {
     async writeState(slug, number, commentId, body) {
       calls.push({ op: 'writeState', args: [slug, number, commentId, body] })
       const i = /** @type {Required<FakeIssue>} */ (store.get(number))
+      if (parseDecideMarker(body)) {
+        if (crash.decideWrite) {
+          const err = crash.decideWrite
+          crash.decideWrite = null
+          throw err
+        }
+        return own(i, commentId, body)
+      }
       if (commentId && i.comment?.id !== commentId) throw new Error(`no comment ${commentId}`)
       const id = commentId ?? nextComment++
       i.comment = { id, body }
@@ -183,6 +209,8 @@ export function fakeGitHub({ issues = [], prs = [] } = {}) {
     },
     async comment(slug, number, body) {
       calls.push({ op: 'comment', args: [slug, number, body] })
+      if (/<!-- cambium:decide-post /.test(body) || /<!-- cambium:answer /.test(body))
+        own(/** @type {Required<FakeIssue>} */ (store.get(number)), null, body)
     },
     async deleteBranch(slug, branch) {
       calls.push({ op: 'deleteBranch', args: [slug, branch] })
@@ -252,6 +280,8 @@ export function fakeGitHub({ issues = [], prs = [] } = {}) {
     github,
     calls,
     faults,
+    crash,
+    commentClock,
     health,
     runs,
     rules,
