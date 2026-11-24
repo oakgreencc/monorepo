@@ -1,13 +1,12 @@
 // @ts-check
-/** Upkeep (graph engine): the hourly reaper of untracked agent PRs and the daily re-triage of `q:human`. */
+/** Upkeep (graph engine): the hourly reaper of untracked agent PRs, and the triage-input fingerprint. */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { branchIssue, unreadCloses } from '../src/github.mjs'
 import { reapVerdict } from '../src/upkeep.mjs'
 import { newMarker, renderMarker } from '../src/marker.mjs'
 import { tick } from '../src/tick.mjs'
-import { resolveConfig } from '../src/config.mjs'
-import { fingerprintOf, retriageDecision, TRIAGE_RUBRIC } from '../src/triage-inputs.mjs'
+import { fingerprintOf, retriageDecision } from '../src/triage-inputs.mjs'
 import { harness, SLUG } from './fakes.mjs'
 
 const MIN = 60_000
@@ -136,36 +135,6 @@ test('reaper closes a PR whose issue is closed, and an issue-less one only after
   assert.match(h.gh.calls.filter((c) => c.op === 'closePull')[1].args[2], /Abandoned: no issue names this PR/)
 })
 
-test('re-triage: daily, q:human back to q:intake without its why; not why:approve', async () => {
-  const h = graph({
-    issues: [
-      { number: 70, labels: ['q:human', 'why:triage'] },
-      { number: 71, labels: ['q:human', 'why:budget', 'priority:high'] },
-      { number: 72, labels: ['q:human', 'why:approve'] },
-    ],
-    config: { retriage: { enabled: true, time: '00:00' }, reaper: { everyMinutes: 0 } },
-  })
-  await tick(h.deps)
-  assert.deepEqual(h.gh.issue(70).labels, ['q:intake'])
-  assert.deepEqual(h.gh.issue(71).labels.sort(), ['priority:high', 'q:intake'])
-  assert.deepEqual(h.gh.issue(72).labels.sort(), ['q:human', 'why:approve'])
-
-  // Once a day: a human sent back later the same day stays.
-  h.gh.issue(70).labels = ['q:human', 'why:triage']
-  h.clock.advance(60 * MIN)
-  await tick(h.deps)
-  assert.deepEqual(h.gh.issue(70).labels.sort(), ['q:human', 'why:triage'])
-  h.clock.advance(24 * 60 * MIN)
-  await tick(h.deps)
-  assert.deepEqual(h.gh.issue(70).labels, ['q:intake'])
-})
-
-test('re-triage is off by default', async () => {
-  const h = graph({ issues: [{ number: 70, labels: ['q:human', 'why:triage'] }] })
-  await tick(h.deps)
-  assert.deepEqual(h.gh.issue(70).labels.sort(), ['q:human', 'why:triage'])
-})
-
 test('reapVerdict: an issue with a live worker is left to it', () => {
   const issue = /** @type {any} */ ({ number: 5, state: 'OPEN', labels: ['q:task', 'running'], stateComment: null })
   const snap = /** @type {any} */ ({ issues: new Map([[5, issue]]), prs: [] })
@@ -181,185 +150,7 @@ test('reapVerdict: an issue with a live worker is left to it', () => {
   assert.deepEqual(reapVerdict(pr, snap, { ...o, busy: () => false }), { act: 'adopt', issue, link: false })
 })
 
-// ---- Re-triage skips an issue whose triage inputs are unchanged (triage-inputs.mjs)
-
-const DAY = 24 * 60 * MIN
-const RETRIAGE = {
-  retriage: { enabled: true, time: '00:00' },
-  reaper: { everyMinutes: 0 },
-}
-
-/**
- * A `q:human` issue at the dispatch graph's `to-human` whose marker carries the fingerprint of the issue as `seed`
- * reads it (or `fingerprint` as given).
- * @param {{ number?: number, labels?: string[], comments?: any[], blockedBy?: any[], body?: string }} seed
- * @param {{ prs?: any[], rubric?: number, at?: number, fingerprint?: any, others?: any[] }} [o]
- */
-async function triagedHuman(
-  seed,
-  { prs = [], rubric, at = Date.parse('2026-11-16T12:00:00Z'), fingerprint, others = [] } = {},
-) {
-  const number = seed.number ?? 70
-  const issue = { number, labels: ['q:human', 'why:triage'], ...seed }
-  const h = graph({ issues: [issue, ...others], prs, config: RETRIAGE })
-  const snap = await h.gh.github.read(SLUG)
-  const read = /** @type {any} */ (snap.issues.get(number))
-  const fp =
-    fingerprint === undefined
-      ? {
-          hash: fingerprintOf(read, snap, { rubric }),
-          at: new Date(at).toISOString(),
-        }
-      : fingerprint
-  h.gh.issue(number).comment = {
-    id: 1,
-    body: renderMarker(
-      newMarker({
-        graph: 'dispatch',
-        phase: 'dispatch',
-        node: 'to-human',
-        lastFailure: 'Which one?',
-        fingerprint: fp,
-      }),
-    ),
-  }
-  return h
-}
-
-const retriageLog = (/** @type {ReturnType<typeof harness>} */ h) =>
-  h.events.filter((e) => /^re-triage:/.test(e.msg)).at(-1)?.msg ?? ''
-
-test('re-triage: an unchanged q:human issue stays, no label moves, no worker; the log counts it skipped', async () => {
-  const h = await triagedHuman({
-    comments: [
-      {
-        id: 5,
-        author: 'alice',
-        bot: false,
-        createdAt: '2026-11-15T00:00:00Z',
-        body: 'Hm.',
-      },
-    ],
-  })
-  await tick(h.deps)
-  assert.deepEqual(h.gh.issue(70).labels.sort(), ['q:human', 'why:triage'])
-  assert.equal(h.gh.calls.filter((c) => c.op === 'label').length, 0)
-  assert.equal(h.spawner.started.length, 0)
-  assert.match(retriageLog(h), /^re-triage: 0 of 1 changed; 0 back to q:intake, 1 unchanged skipped/)
-})
-
-test('re-triage: an edited body, a human comment, a label or a closed blocker each re-triage', async () => {
-  const at = '2026-11-15T00:00:00Z'
-  /** @type {[string, (h: ReturnType<typeof harness>) => void, any?, any?][]} */
-  const cases = [
-    [
-      'body',
-      (h) => {
-        h.gh.issue(70).body = 'Edited: use the second tick.'
-      },
-    ],
-    [
-      'comment',
-      (h) =>
-        void h.gh.issue(70).comments.push({
-          id: 9,
-          author: 'alice',
-          bot: false,
-          createdAt: at,
-          body: 'The second.',
-        }),
-    ],
-    ['label', (h) => void h.gh.issue(70).labels.push('area:ui')],
-    [
-      'blocker',
-      (h) => {
-        h.gh.issue(80).state = 'CLOSED'
-      },
-      { blockedBy: [{ number: 80, state: 'OPEN', closedAt: null }] },
-      { others: [{ number: 80, labels: ['q:task'] }] },
-    ],
-  ]
-  for (const [what, change, seed = {}, o = {}] of cases) {
-    const h = await triagedHuman(seed, o)
-    change(h)
-    await tick(h.deps)
-    assert.deepEqual(
-      h.gh.issue(70).labels.filter((l) => l.startsWith('q:')),
-      ['q:intake'],
-      what,
-    )
-    assert.match(retriageLog(h), /^re-triage: 1 of 1 changed/, what)
-  }
-})
-
-test('re-triage: a bot or cambium comment and a cambium label move do not count as a change', async () => {
-  const h = await triagedHuman({})
-  h.gh.issue(70).comments.push({
-    id: 11,
-    author: 'ci[bot]',
-    bot: true,
-    createdAt: '2026-11-15T00:00:00Z',
-    body: 'ping',
-  })
-  h.gh.issue(70).labels.push('wait:deferred')
-  await tick(h.deps)
-  assert.ok(h.gh.issue(70).labels.includes('q:human'))
-})
-
-test('re-triage: a new triage rubric version re-triages every q:human issue', async () => {
-  const h = await triagedHuman({}, { rubric: TRIAGE_RUBRIC - 1 })
-  await tick(h.deps)
-  assert.deepEqual(h.gh.issue(70).labels, ['q:intake'])
-})
-
-test('re-triage: an issue unchanged for retriage.maxSkipDays is re-triaged anyway', async () => {
-  const h = await triagedHuman({}, { at: Date.parse('2026-11-16T12:00:00Z') - 14 * DAY + 1 })
-  await tick(h.deps)
-  assert.ok(h.gh.issue(70).labels.includes('q:human'), 'one ms short of 14 days: skipped')
-  h.clock.advance(DAY)
-  await tick(h.deps)
-  assert.deepEqual(h.gh.issue(70).labels, ['q:intake'])
-  assert.match(retriageLog(h), /re-triage: 1 of 1 changed/)
-})
-
-test('retriage.maxSkipDays: default 14; must be a number ≥ 0', () => {
-  assert.equal(resolveConfig({}).retriage.maxSkipDays, 14)
-  assert.equal(resolveConfig({ retriage: { maxSkipDays: 0 } }).retriage.maxSkipDays, 0)
-  assert.throws(() => resolveConfig({ retriage: { maxSkipDays: -1 } }), /maxSkipDays/)
-  assert.throws(() => resolveConfig({ retriage: { maxSkipDays: '7' } }), /maxSkipDays/)
-})
-
-test('re-triage: a marker without a fingerprint is re-triaged once and gains one; then it is skipped', async () => {
-  const h = graph({
-    issues: [{ number: 70, labels: ['q:human', 'why:triage'] }],
-    config: { ...RETRIAGE, phases: { task: { cap: 0 }, dispatch: { cap: 1 } } },
-  })
-  await tick(h.deps)
-  // Re-triage moved it (upkeep runs after Schedule); the next tick starts triage.
-  assert.deepEqual(h.gh.issue(70).labels, ['q:intake'])
-  await tick(h.deps)
-  const w = h.deps.store.worker(SLUG, 70)
-  assert.ok(w)
-  h.spawner.logs.set(
-    w.stdout,
-    JSON.stringify({
-      type: 'result',
-      subtype: 'success',
-      is_error: false,
-      result: '```json\n{"verdict":"needs-human","reason":"Which one?"}\n```',
-    }),
-  )
-  h.procs.live.delete(w.pid)
-  await tick(h.deps)
-  assert.deepEqual(h.gh.issue(70).labels.sort(), ['q:human', 'why:triage'])
-  const m = h.gh.marker(70)
-  assert.match(m?.fingerprint?.hash ?? '', /^[0-9a-f]{16}$/)
-  h.clock.advance(DAY)
-  await tick(h.deps)
-  assert.deepEqual(h.gh.issue(70).labels.sort(), ['q:human', 'why:triage'])
-  assert.equal(h.deps.store.worker(SLUG, 70), null)
-  assert.match(retriageLog(h), /0 of 1 changed/)
-})
+// ---- Triage inputs (triage-inputs.mjs), which the stall fallback's re-triage checks
 
 test('fingerprint: cambium labels do not count; the title does', () => {
   const issue = /** @type {any} */ ({
@@ -376,7 +167,7 @@ test('fingerprint: cambium labels do not count; the title does', () => {
   assert.notEqual(fingerprintOf({ ...issue, title: 'u' }, snap), a)
 })
 
-test('retriageDecision: a linked PR merged since the verdict is a change', () => {
+test('retriageDecision: a linked PR merged since the verdict is a change; no fingerprint is no re-triage', () => {
   const issue = /** @type {any} */ ({
     number: 70,
     title: 't',
@@ -395,17 +186,16 @@ test('retriageDecision: a linked PR merged since the verdict is a change', () =>
     issues: new Map([[70, issue]]),
     prs: [pr],
   })
-  const now = Date.parse('2026-11-16T12:00:00Z')
   issue.stateComment = {
     id: 1,
     marker: {
       fingerprint: {
         hash: fingerprintOf(issue, snap),
-        at: new Date(now).toISOString(),
+        at: '2026-11-16T12:00:00Z',
       },
     },
   }
-  const o = { now, maxSkipDays: 14 }
+  const o = {}
   assert.deepEqual(retriageDecision(issue, snap, o), {
     retriage: false,
     why: 'unchanged',
@@ -417,7 +207,7 @@ test('retriageDecision: a linked PR merged since the verdict is a change', () =>
   })
   issue.stateComment = null
   assert.deepEqual(retriageDecision(issue, snap, o), {
-    retriage: true,
+    retriage: false,
     why: 'no fingerprint',
   })
 })

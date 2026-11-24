@@ -169,7 +169,7 @@ const startTriage = declare(
       await land(ctx, 'triaging', {
         ...m0,
         reply,
-        // The inputs this worker sees; to-human keeps them on a needs-human verdict, so re-triage can skip it.
+        // The inputs this worker sees; to-human keeps them on a needs-human verdict, so the stall fallback re-triages it only on a change.
         fingerprint: { hash: fingerprintOf(issue, snap, { botLogin: config.graft.botLogin }), at: iso(ctx.tick.now) },
         deferUntil: null,
         host: config.host,
@@ -405,7 +405,7 @@ const toHuman = declare(
     /**
      * Into the Human Queue with `why:triage` and the reason in the state comment; a needs-human verdict's `ask` adds
      * its `ask:*` labels and is rendered there too. A needs-human verdict keeps the triage inputs `start-triage`
-     * recorded (re-triage skips the issue while they hold); a spent budget drops them.
+     * recorded (the stall fallback re-triages it only once they change); a spent budget drops them.
      * @param {z.infer<typeof HumanIn>} input @param {DispatchCtx} ctx
      */
     run: async ({ ask, ...what }, ctx) => {

@@ -29,7 +29,7 @@ import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
  *   checks: 'SUCCESS' | 'FAILURE' | 'ERROR' | 'PENDING' | 'EXPECTED' | null, failing: FailingCheck[], closes: number[],
  *   mergeable: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN' | null,
  *   reviewDecision: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null, createdAt: string | null,
- *   updatedAt?: string | null, mergeState?: string | null, autoMergeAt?: string | null,
+ *   updatedAt?: string | null, mergedAt?: string | null, mergeState?: string | null, autoMergeAt?: string | null,
  * }} PullRequest
  *   `mergeable`: GitHub's conflict check against the base (UNKNOWN while it computes). `mergeState`: GitHub's
  *   `mergeStateStatus` (BLOCKED: a rule holds it, whatever its checks say). `autoMergeAt`: when auto-merge was armed. `reviewDecision`: null
@@ -103,7 +103,7 @@ import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
  *   an issue is left out.
  */
 
-const PR_FIELDS = `number url headRefName state headRefOid isInMergeQueue body mergeable mergeStateStatus reviewDecision createdAt updatedAt
+const PR_FIELDS = `number url headRefName state headRefOid isInMergeQueue body mergeable mergeStateStatus reviewDecision createdAt updatedAt mergedAt
   headRef { id }
   autoMergeRequest { enabledAt }
   closingIssuesReferences(first: 5) { nodes { number } }
@@ -385,6 +385,7 @@ export function normalize(data, { botLogin = null, release = null, health = null
       reviewDecision: p.reviewDecision ?? null,
       createdAt: p.createdAt ?? null,
       updatedAt: p.updatedAt ?? null,
+      mergedAt: p.mergedAt ?? null,
     })
   }
   const unqueued = repo.unqueued

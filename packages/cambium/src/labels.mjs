@@ -28,6 +28,9 @@ export const WHY = /** @type {const} */ ({
 /** Marks a root-cause ticket the rescue graph filed (graphs/rescue.mjs). Not a `why:` label: those leave with `q:human`. */
 export const RESCUE_LABEL = 'rescue'
 
+/** Marks a report the stall fallback opened for a blocked-by loop (stall.mjs). */
+export const STALL_LABEL = 'stall'
+
 /** @param {string[]} labels */
 export const queueOf = (labels) => labels.find((l) => l.startsWith('q:')) ?? null
 
