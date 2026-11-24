@@ -15,6 +15,7 @@ import { plist, plistPath } from './launchd.mjs'
 import { openStore } from './store.mjs'
 import { finish, newCtx, startTask } from './tick.mjs'
 import { REPO_GRAPHS, runIssue } from './graph-engine.mjs'
+import { heartbeatFresh } from './snapshot-file.mjs'
 import { createTelemetry } from './tracing.mjs'
 import { defaultExec, realUpdater, runUpdate, VERSION } from './update.mjs'
 
@@ -199,8 +200,9 @@ function readMode(path) {
 function status(config, io, json) {
   const hb = readHeartbeat(config.paths.heartbeat)
   const mode = readMode(config.paths.db)
-  const age = hb ? Math.round(((io.now ?? Date.now)() - Date.parse(hb.tick?.finishedAt)) / 1000) : Number.NaN
-  const stale = !(age <= (hb?.daemon?.tickSeconds ?? 0) * 3)
+  const now = (io.now ?? Date.now)()
+  const age = hb ? Math.round((now - Date.parse(hb.tick?.finishedAt)) / 1000) : Number.NaN
+  const stale = !heartbeatFresh(hb, now)
   if (json) {
     io.out(JSON.stringify({ mode, heartbeat: hb }, null, 2))
     return stale ? 1 : 0

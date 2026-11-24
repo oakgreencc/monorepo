@@ -25,6 +25,7 @@ import { isRepair } from './base-health.mjs'
 import { stopOverdue } from './workers.mjs'
 import { syncBriefs } from './briefs.mjs'
 import { queueView } from './queue-view.mjs'
+import { snapshotsFile } from './snapshot-file.mjs'
 import { costDays, costOf, dayOf, overBudget, recordCost } from './cost.mjs'
 
 /**
@@ -44,6 +45,8 @@ import { costDays, costOf, dayOf, overBudget, recordCost } from './cost.mjs'
  *   heartbeat?: (state: HeartbeatState) => void | Promise<void>,
  *   queues?: { write(view: import('./queue-view.mjs').QueuesFile): void | Promise<void>,
  *     prev?(): import('./queue-view.mjs').QueuesFile | null },
+ *   snapshots?: { write(file: import('./snapshot-file.mjs').SnapshotsFile): void | Promise<void> },
+ *   daemonFeed?: { latest(slug: string): import('./snapshot-file.mjs').Feed },
  *   dispatch?: import('./phases/dispatch.mjs').Dispatch,
  *   release?: import('./phases/release.mjs').Release,
  *   tickNumber?: number,
@@ -55,7 +58,8 @@ import { costDays, costOf, dayOf, overBudget, recordCost } from './cost.mjs'
  *   pid?: number,
  * }} Deps
  *   `queues`: writes the queue view canopy reads (queue-view.mjs); `prev` is the last one written, whose boards a repo
- *   not read this tick keeps.
+ *   not read this tick keeps. `snapshots`: writes each repo's full snapshot (snapshot-file.mjs), for followers.
+ *   `daemonFeed`: a follower's view of a live daemon's snapshots (graph-engine.mjs `runIssue`); the tick ignores it.
  * @typedef {{ name: string, ok: boolean, ms: number, error: string | null }} StepResult
  * @typedef {{
  *   now: number, mode: import('./store.mjs').Mode, snaps: Map<string, Snapshot>,
@@ -116,6 +120,7 @@ export async function tick(deps) {
   ]
   for (const [name, fn] of steps) await runStep(deps, ctx, name, () => fn(deps, ctx))
   if (deps.queues) await runStep(deps, ctx, 'queues', () => writeQueueView(deps, ctx))
+  if (deps.snapshots) await runStep(deps, ctx, 'snapshots', () => writeSnapshotsFile(deps, ctx))
   const state = heartbeatState(deps, ctx)
   if (deps.heartbeat) await runStep(deps, ctx, 'heartbeat', async () => deps.heartbeat?.(state))
   return state
@@ -886,6 +891,23 @@ async function writeQueueView(deps, ctx) {
     prev: deps.queues.prev?.() ?? null,
   })
   await deps.queues.write(view)
+}
+
+/**
+ * Each repo's full snapshot, as this tick leaves it, for `run … --follow` (snapshot-file.mjs). Local files only.
+ * @param {Deps} deps @param {Ctx} ctx
+ */
+async function writeSnapshotsFile(deps, ctx) {
+  await deps.snapshots?.write(
+    snapshotsFile({
+      repos: deps.config.repos.map((r) => r.slug),
+      snaps: ctx.snaps,
+      readErrors: ctx.readErrors,
+      fetchedAt: ctx.now,
+      now: deps.clock.now(),
+      tickSeconds: deps.config.tickSeconds,
+    }),
+  )
 }
 
 // ---- Briefs
