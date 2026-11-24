@@ -23,7 +23,7 @@ import { dispatch, lostLeaseOf, nodeOf, openBlockers } from './graphs/dispatch.m
 import { iso, key, markerOf, setLabels, setMarker } from './issue-state.mjs'
 import { byPriorityThenAge, move, Q, RUNNING, WAIT, WHY } from './labels.mjs'
 import { newMarker, withHistory } from './marker.mjs'
-import { humanReplies, stateSince } from './human-reply.mjs'
+import { humanReplies, replyAuthor, stateSince } from './human-reply.mjs'
 import { each, eachWorker, staleLeases } from './tick.mjs'
 import { markerTrace, turnTracer } from './tracing.mjs'
 
@@ -262,7 +262,7 @@ async function wake(deps, ctx) {
         const replies = humanReplies(issue, { since, botLogin })
         if (!since || !replies.length) return
         const at = iso(ctx.now)
-        const who = [...new Set(replies.map((r) => `@${r.author}`))].join(', ')
+        const who = [...new Set(replies.map((r) => `@${replyAuthor(r)}`))].join(', ')
         await setMarker(deps, slug, issue, {
           ...newMarker({
             graph: dispatch.name,

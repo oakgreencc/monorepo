@@ -6,8 +6,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { normalize } from '../src/github.mjs'
-import { humanReplies, quoted, REPLY_CHARS, replyContextOf, stateSince } from '../src/human-reply.mjs'
-import { newMarker, renderMarker } from '../src/marker.mjs'
+import { humanReplies, parseAnswer, quoted, REPLY_CHARS, replyContextOf, stateSince } from '../src/human-reply.mjs'
+import { newMarker, parseMarker, renderMarker } from '../src/marker.mjs'
+import { fingerprintOf, triageInputs } from '../src/triage-inputs.mjs'
 import { triagePrompt } from '../src/phases/dispatch.mjs'
 import { tick } from '../src/tick.mjs'
 import { harness, SLUG, T0 } from './fakes.mjs'
@@ -361,4 +362,121 @@ test('triagePrompt: replies quoted under the question; quoted() keeps the newest
   assert.match(p, /@bob at 2026-11-16T12:10:00\.000Z:\n> two lines\n> xxx/)
   const plain = triagePrompt({ repo: SLUG, baseBranch: 'main', issue, queued: [], agentsMd: null })
   assert.ok(!plain.includes('A human has since replied'))
+})
+
+// ---- Answer comments (#162): a decision made in a decide session, posted through graft as the App
+
+/** An answer comment's body. @param {string} text @param {Record<string, unknown>} [o] */
+const answerBody = (text, o = {}) =>
+  `<!-- cambium:answer ${JSON.stringify({ graph: 'decide', decideAt: at(T0), answerer: 'alice', ...o })} -->\n${text}`
+
+test('parseAnswer: the payload, separate from the state marker; malformed is ignored without throwing', () => {
+  assert.deepEqual(parseAnswer(answerBody('x')), { graph: 'decide', decideAt: at(T0), answerer: 'alice' })
+  assert.equal(parseMarker(answerBody('x')), null, 'not mistaken for state')
+  assert.equal(parseAnswer(renderMarker(newMarker())), null, 'a state marker is no answer')
+  assert.equal(parseAnswer('plain text'), null)
+  assert.equal(parseAnswer(null), null)
+  for (const bad of ['{not json', '[1]', 'null', '"s"', '{"graph":"decide"}', '{"answerer":""}', '{"answerer":3}'])
+    assert.equal(parseAnswer(`<!-- cambium:answer ${bad} -->`), null, bad)
+})
+
+test('humanReplies: an answer comment counts whoever wrote it, after since only; without the marker it does not', () => {
+  const issue = /** @type {import('../src/github.mjs').Issue} */ ({
+    number: 7,
+    stateComment: { id: 1, marker: newMarker(), author: 'cambium-app' },
+    comments: [
+      comment(BOT, T0 - MIN, answerBody('before the state: not a reply')),
+      comment(BOT, T0 + MIN, answerBody('by the bot login')),
+      comment('cambium-app', T0 + MIN, answerBody('by the state comment author')),
+      comment('graft-app', T0 + MIN, answerBody('by a Bot account'), true),
+      comment(BOT, T0 + MIN, 'the App without the marker'),
+      comment('graft-app', T0 + MIN, 'a Bot without the marker', true),
+      comment(BOT, T0 + MIN, '<!-- cambium:answer {broken -->'),
+      comment(BOT, T0 + MIN, `${renderMarker(newMarker())}\n${answerBody('state and answer')}`),
+    ],
+  })
+  assert.deepEqual(
+    humanReplies(issue, { since: at(T0), botLogin: BOT }).map((c) => c.body.split('\n').at(-1)),
+    ['by the bot login', 'by the state comment author', 'by a Bot account'],
+  )
+  assert.deepEqual(
+    quoted(humanReplies(issue, { since: at(T0), botLogin: BOT })).map((r) => r.author),
+    ['alice', 'alice', 'alice'],
+    'quoted as the answerer, not the App',
+  )
+})
+
+test('triage inputs: answer comments are in the fingerprint like human comments; App comments are not', () => {
+  const base = /** @type {any} */ ({
+    number: 7,
+    title: 'T',
+    body: 'B',
+    labels: ['q:human'],
+    stateComment: { id: 1, marker: newMarker(), author: BOT },
+    comments: [],
+  })
+  const fp = fingerprintOf(base, undefined, { botLogin: BOT })
+  const plain = { ...base, comments: [{ ...comment(BOT, T0, 'cambium says'), id: 5 }] }
+  assert.equal(fingerprintOf(plain, undefined, { botLogin: BOT }), fp)
+  const answered = { ...base, comments: [{ ...comment(BOT, T0, answerBody('Option A.')), id: 6 }] }
+  assert.deepEqual(triageInputs(answered, undefined, { botLogin: BOT }).comments, ['6'])
+  assert.notEqual(fingerprintOf(answered, undefined, { botLogin: BOT }), fp)
+})
+
+test('a q:human decide ask answered by an App-authored answer comment: woken, quoted, actionable → q:task', async () => {
+  const ask = 'Should the mobile app store auth tokens in the keychain or in encrypted storage?'
+  const issue = humanIssue({
+    body: 'Persist the session across app restarts.',
+    comment: stateComment({
+      node: 'to-human',
+      enteredAt: at(T0 - 60 * MIN),
+      lastFailure: ask,
+      ask: {
+        kind: 'decide',
+        question: ask,
+        options: [
+          { label: 'Keychain', detail: 'OS-backed, survives reinstall on iOS.' },
+          { label: 'Encrypted storage', detail: 'One code path on both platforms.' },
+        ],
+        recommendation: 'Keychain',
+        interactive: true,
+      },
+      history: [{ at: at(T0 - 60 * MIN), attempt: 1, outcome: 'needs-human', reason: ask, node: 'triaging' }],
+    }),
+  })
+  const decision = [
+    '**Decision:** Keychain, via expo-secure-store.',
+    '',
+    '**Acceptance checks**',
+    '- [ ] Tokens are written with expo-secure-store',
+    '- [ ] A restart keeps the user signed in',
+  ].join('\n')
+  const h = graph({ issues: [issue] })
+  await tick(h.deps)
+  assert.equal(h.spawner.started.length, 0, 'no answer yet')
+
+  h.gh.issue(7).comments.push(comment(BOT, T0 - MIN, 'cambium: a plain App comment never wakes it'))
+  await tick(h.deps)
+  assert.equal(h.spawner.started.length, 0)
+
+  h.gh.issue(7).comments.push(comment(BOT, T0 - MIN, answerBody(decision, { answerer: 'jdoe' }), true))
+  await tick(h.deps)
+  assert.equal(h.spawner.started.length, 1, 'the answer wakes it to start-triage, triaged in the same tick')
+  assert.match(h.gh.marker(7)?.history.at(-1)?.reason ?? '', /@jdoe/)
+  const p = h.spawner.started[0].prompt
+  assert.match(p, /left it waiting on this:\n> Should the mobile app store auth tokens/)
+  assert.match(p, /@jdoe at [^\n]*:\n/)
+  assert.ok(!p.includes(`@${BOT} at`), 'quoted as the answerer')
+  assert.match(p, /> \*\*Decision:\*\* Keychain, via expo-secure-store\./)
+  assert.match(p, /> - \[ \] A restart keeps the user signed in/)
+  assert.match(p, /`cambium:answer` marker/)
+
+  h.clock.advance(MIN)
+  await finishTriage(h, {
+    verdict: 'actionable',
+    reason: 'Decided: Keychain.',
+    title: 'Persist auth tokens in the keychain via expo-secure-store',
+    acceptance: ['Tokens are written with expo-secure-store', 'A restart keeps the user signed in'],
+  })
+  assert.deepEqual(h.gh.issue(7).labels.sort(), ['q:task'])
 })

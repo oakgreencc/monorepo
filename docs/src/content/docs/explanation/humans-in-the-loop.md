@@ -36,9 +36,11 @@ Blocked and deferred issues carry `wait:blocked` and `wait:deferred`, so canopy 
 
 canopy's inbox is read-only; a person answers by commenting on the issue on GitHub. cambium treats a comment as a **human reply** when it came after the issue entered its current state and was written by neither cambium's App nor any other bot.
 
+A decision made in a `decide` session is the one exception. graft posts it as the App, so it carries an answer marker naming the person who decided: `<!-- cambium:answer {"graph":"decide","decideAt":"…","answerer":"<login>"} -->`. That comment counts as a reply, and triage sees it as from the answerer. A decision that comes with acceptance checks normally becomes a task with those checks.
+
 A `q:human` issue with a reply goes back to triage (except `why:approve`, which needs a merge, not an answer). A parked issue with a reply is triaged straight away, whatever its timer or blockers — the person may be saying it is not waiting on anything. Triage sees the replies quoted next to the question that prompted them, and usually turns the issue into a task.
 
-There are no loops. cambium's own comments never count, and a new verdict starts a new state, so a triage that asks again simply rests until the next reply.
+There are no loops. cambium's own comments never count (except an answer comment), and a new verdict starts a new state, so a triage that asks again simply rests until the next reply.
 
 ## The human queue belongs to the human
 
