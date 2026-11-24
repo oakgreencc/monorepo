@@ -28,8 +28,10 @@ One JSON file: `--config`, else `$CAMBIUM_CONFIG`, else `~/.cambium/config.json`
       "deferHours": 6,
       "maxDefers": 8
     },
-    "rescue": { "cap": 0, "wallClockMinutes": 20, "maxTurns": 80, "maxAttempts": 1 }
+    "rescue": { "cap": 0, "wallClockMinutes": 20, "maxTurns": 80, "maxAttempts": 1 },
+    "decide": { "cap": 1, "wallClockMinutes": 20, "maxTurns": 80, "maxAttempts": 3 }
   },
+  "decide": { "channel": null, "answerers": {}, "idleHours": 24 },
   "mergeQueueMinutes": 120,
   "mergeStallMinutes": 20,
   "watchEveryMinutes": 5,
@@ -107,6 +109,7 @@ A file that does not load, or has no `repos`, keeps the running config and logs 
 | `release`       | see below          | Per-repo release settings (graph engine).                                                     |
 | `phases`        | `{}`               | Per-repo overrides of `wallClockMinutes` and `maxTurns`, by phase: `{ "task": { "wallClockMinutes": 120 } }`. Other keys are refused. |
 | `watch`         | `[]`               | Workflows whose latest run must be green. See [`repos[].watch`](#reposwatch). |
+| `decide`        | top-level `decide` | Per-repo hosted decisions. `answerers` merge over the top level's, per channel. See [`decide`](#decide). |
 
 `repos[].release`: `{ "enabled", "time", "readEveryMinutes", "from", "to", "check", "signal" }`. `enabled`, `time` and `readEveryMinutes` default to the top-level `release`; `from` to `baseBranch`; `to` to `"main"`; `check` to the repo's `requiredCheck`; `signal` to `"merged"`. A release is cut at the newest `from` commit where `check` is green; `null` cuts at the tip. A repo whose `from` equals `to` has no promotion PR.
 
@@ -153,6 +156,24 @@ Verdicts are kept in the store across restarts, and each repo's are in the heart
 | `rescue.wallClockMinutes`   | `20`    |                                                                      |
 | `rescue.maxTurns`           | `80`    |                                                                      |
 | `rescue.maxAttempts`        | `1`     |                                                                      |
+| `decide.cap`                | `1`     | Live workers for [hosted decisions](#decide).                        |
+| `decide.wallClockMinutes`   | `20`    |                                                                      |
+| `decide.maxTurns`           | `80`    |                                                                      |
+| `decide.maxAttempts`        | `3`     | Failed runs of one step before it stops retrying; the marker shows the error. |
+
+## `decide`
+
+Hosted decisions: cambium walks a person through a `q:human` issue labelled `ask:decide` and `ask:session` on a channel, without a terminal. Needs `engine: "graph"`.
+
+| Key          | Default | Meaning |
+| ------------ | ------- | ------- |
+| `channel`    | `null`  | `null` (off) or `"github"`: rounds of questions and the draft are posted as issue comments, and replies are read from comments. |
+| `answerers`  | `{}`    | Per channel, the logins whose replies count: `{ "github": ["ana", "james"] }`. Case-insensitive. The channel in use needs at least one. Anyone else's reply is ignored and noted in the decision's marker. |
+| `idleHours`  | `24`    | No reply for this long pauses the decision until the next one. |
+
+```json
+"decide": { "channel": "github", "answerers": { "github": ["james"] } }
+```
 
 ## Clocks
 

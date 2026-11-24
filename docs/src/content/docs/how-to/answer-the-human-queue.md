@@ -32,6 +32,17 @@ For a `why:budget` item, cambium writes a session brief: the issue, what each at
 
 Other `q:human` items get no brief and no command.
 
+## Decide on GitHub
+
+When the repository has hosted decisions on (`decide.channel: "github"`), cambium walks a decision labelled `ask:decide` and `ask:session` through on the issue itself.
+
+1. cambium comments a round of numbered questions, each with a recommendation.
+2. Reply in one comment: `1 yes`, `2 the second option, because…`. `yes` alone accepts every recommendation; `stop` abandons.
+3. Further rounds follow until nothing is open. Then cambium comments a draft: the choice, scope, acceptance checks and follow-up issues.
+4. Reply `yes` to commit it, say what to change, or `abandon`.
+
+On `yes`, cambium files the follow-ups and posts the decision; the issue goes back to triage. Only logins listed in `decide.answerers.github` can answer; other replies are ignored. A day without a reply pauses the decision; the next reply resumes it.
+
 ## Reply to send it back
 
 With the graph engine and triage on, comment on the issue. A comment from a person (not a bot, not the App) wakes it: cambium moves it back to `q:intake`, and triage reads your reply with the original question. This works for every `why:*` except `why:approve`.
