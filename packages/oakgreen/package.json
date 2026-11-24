@@ -1,6 +1,6 @@
 {
   "name": "oakgreen",
-  "version": "0.0.76",
+  "version": "0.0.77",
   "description": "Umbrella CLI for the oakgreen stack: `oakgreen doctor` checks a machine and repository, `oakgreen setup` bootstraps what is missing, and `oakgreen <tool>` runs graft, canker, deadwood, cambium, mycelium or canopy.",
   "license": "AGPL-3.0-only",
   "type": "module",
