@@ -233,7 +233,7 @@ function replied(deps, issue) {
 }
 
 /**
- * Wake: every `q:human` issue (any `why:*` but `why:approve`, as re-triage) with no lease, no tracked worker and a
+ * Wake: every `q:human` issue (any `why:*` but `why:approve`) with no lease, no tracked worker and a
  * human reply since it entered its state goes back to `q:intake` at `start-triage`, attempt 1, its history kept with
  * a `human-reply` entry and the `reply` context the triage prompt quotes. The new state starts now, so the same
  * reply never wakes it again: a triage that answers needs-human again rests until the next reply.

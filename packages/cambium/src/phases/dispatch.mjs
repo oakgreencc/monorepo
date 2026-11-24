@@ -143,7 +143,7 @@ export function readTriage(log, issue) {
  * }} input
  *   `blocked`: an earlier triage parked it on these issues, all closed now. `replied`: a human commented since the
  *   issue last waited; `question` is what it waited on (the needs-human, defer or blocked reason).
- *   A change to how triage judges an issue bumps `TRIAGE_RUBRIC` (triage-inputs.mjs), so re-triage looks again.
+ *   A change to how triage judges an issue bumps `TRIAGE_RUBRIC` (triage-inputs.mjs), so the stall fallback looks again at the issues it finds stalled.
  */
 export function triagePrompt({
   repo,
