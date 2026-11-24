@@ -22,6 +22,9 @@ export const T0 = Date.parse('2026-11-16T12:00:00Z')
  *   `behind`: commits of its base the head lacks (`behindBase`); `updatePull` zeroes it and moves the head.
  */
 
+/** cambium's PRs: an `agent/` branch. @param {{ branch: string }} p */
+const isAgent = (p) => p.branch.startsWith('agent/')
+
 /** @param {{ issues?: FakeIssue[], prs?: FakePr[] }} [seed] */
 export function fakeGitHub({ issues = [], prs = [] } = {}) {
   /** @type {Map<number, Required<FakeIssue>>} */
@@ -59,7 +62,7 @@ export function fakeGitHub({ issues = [], prs = [] } = {}) {
   let nextComment = 1000
   /**
    * `missingLabels`: labels the repo lacks; adding one is refused as graft refuses it.
-   * @type {{ readError: Error | null, labelError: Error | null, hang: boolean, mergeError: Error | null, updateError: Error | null, runsError: Error | null, missingLabels: Set<string> }}
+   * @type {{ readError: Error | null, labelError: Error | null, hang: boolean, mergeError: Error | null, updateError: Error | null, runsError: Error | null, rulesError: Error | null, missingLabels: Set<string> }}
    */
   const faults = {
     readError: null,
@@ -68,6 +71,7 @@ export function fakeGitHub({ issues = [], prs = [] } = {}) {
     mergeError: null,
     updateError: null,
     runsError: null,
+    rulesError: null,
     missingLabels: new Set(),
   }
   /**
@@ -79,6 +83,8 @@ export function fakeGitHub({ issues = [], prs = [] } = {}) {
   const health = { base: null, rateLimit: null }
   /** Workflow runs by `<workflow>@<branch>`, newest first (watch.mjs). @type {Map<string, import("../src/watch.mjs").WorkflowRun[]>} */
   const runs = new Map()
+  /** The rules `mergeRules` reports, by base branch; a base not here has none. @type {Map<string, import("../src/github.mjs").MergeRules>} */
+  const rules = new Map()
   let nextIssue = 9000
 
   const toIssue = (/** @type {Required<FakeIssue>} */ i) => ({
@@ -121,7 +127,9 @@ export function fakeGitHub({ issues = [], prs = [] } = {}) {
       return {
         issues: issuesOut,
         unqueued,
-        prs: pulls.map((p) => ({ ...p, closes: [...p.closes], failing: [...p.failing] })),
+        prs: pulls.filter(isAgent).map((p) => ({ ...p, closes: [...p.closes], failing: [...p.failing] })),
+        // The real read keeps only `agent/*` PRs in `prs`; another open one with auto-merge armed is in `armed`.
+        armed: pulls.filter((p) => !isAgent(p) && p.state === 'OPEN' && p.autoMerge).map((p) => ({ ...p })),
         ...(health.base ? { base: { ...health.base, suspects: [...health.base.suspects], repairs } } : {}),
         rateLimit: health.rateLimit,
       }
@@ -186,6 +194,11 @@ export function fakeGitHub({ issues = [], prs = [] } = {}) {
       if (faults.runsError) throw faults.runsError
       return [...(runs.get(`${workflow}@${branch}`) ?? [])]
     },
+    async mergeRules(slug, base) {
+      calls.push({ op: 'mergeRules', args: [slug, base] })
+      if (faults.rulesError) throw faults.rulesError
+      return rules.get(base) ?? { requiredChecks: [], approvals: 0, codeOwners: false, rulesets: [] }
+    },
     async mergeCommit(slug, number) {
       calls.push({ op: 'mergeCommit', args: [slug, number] })
       const p = pulls.find((x) => x.number === number)
@@ -233,6 +246,7 @@ export function fakeGitHub({ issues = [], prs = [] } = {}) {
     faults,
     health,
     runs,
+    rules,
     pulls,
     issue: (/** @type {number} */ n) => /** @type {Required<FakeIssue>} */ (store.get(n)),
     marker: (/** @type {number} */ n) => parseMarker(store.get(n)?.comment?.body),

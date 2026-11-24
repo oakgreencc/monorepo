@@ -8,6 +8,7 @@
  */
 import { capsFor } from './config.mjs'
 import { watchStates, watchWorkflows } from './watch.mjs'
+import { stallStates, watchStalls } from './merge-stall.mjs'
 import { stallState } from './stall.mjs'
 import { byPriorityThenAge, move, Q, queueOf, RUNNING, WHY } from './labels.mjs'
 import { withHistory } from './marker.mjs'
@@ -116,6 +117,7 @@ export async function tick(deps) {
     ...(ctx.mode === 'running' ? /** @type {[string, StepFn][]} */ ([['schedule', schedule]]) : []),
     ...(paused ? [] : /** @type {[string, any][]} */ ([['release', release]])),
     ...(paused ? [] : /** @type {[string, StepFn][]} */ ([['workflows', watchWorkflows]])),
+    ...(paused ? [] : /** @type {[string, StepFn][]} */ ([['stalls', watchStalls]])),
     ...(paused || !engine.upkeep ? [] : /** @type {[string, StepFn][]} */ ([['upkeep', engine.upkeep]])),
     ...(paused || !deps.gc ? [] : /** @type {[string, StepFn][]} */ ([['gc', gc]])),
     ...(deps.briefs ? /** @type {[string, StepFn][]} */ ([['briefs', briefs]]) : []),
@@ -822,6 +824,7 @@ async function release(deps, ctx) {
  *     slug: string, ok: boolean, error: string | null, read: ReadKind | null, counts: Counts | null,
  *     base: import('./base-health.mjs').BaseHealth | null,
  *     watch: import('./watch.mjs').WatchState[],
+ *     stalls: import('./merge-stall.mjs').Stall[],
  *     stall: import('./stall.mjs').StallState,
  *     rateLimit: { cost: number, remaining: number, resetAt: string } | null,
  *     cost: { issues: IssueCost[], days: import('./cost.mjs').CostDay[] },
@@ -920,6 +923,7 @@ export function heartbeatState(deps, ctx) {
       counts: snap ? countsOf(snap) : null,
       base: snap?.base ?? null,
       watch: watchStates(deps, r.slug),
+      stalls: stallStates(deps.store, r.slug),
       stall: stallState(deps.store, r.slug),
       rateLimit: snap?.rateLimit ?? null,
       cost: {
