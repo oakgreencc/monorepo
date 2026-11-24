@@ -52,6 +52,7 @@ One JSON file: `--config`, else `$CAMBIUM_CONFIG`, else `~/.cambium/config.json`
     "db": "~/.cambium/cambium.db",
     "heartbeat": "~/.cambium/state.json",
     "queues": "~/.cambium/queues.json",
+    "snapshots": "~/.cambium/snapshots.json",
     "logs": "~/.cambium/logs"
   },
   "logs": { "keepPerIssue": 20, "daemonMaxBytes": 10485760 },
@@ -107,7 +108,14 @@ A file that does not load, or has no `repos`, keeps the running config and logs 
 | `phases`        | `{}`               | Per-repo overrides of `wallClockMinutes` and `maxTurns`, by phase: `{ "task": { "wallClockMinutes": 120 } }`. Other keys are refused. |
 | `watch`         | `[]`               | Workflows whose latest run must be green. See [`repos[].watch`](#reposwatch). |
 
-`repos[].release`: `{ "enabled", "time", "readEveryMinutes", "from", "to", "check" }`. `enabled`, `time` and `readEveryMinutes` default to the top-level `release`; `from` to `baseBranch`; `to` to `"main"`; `check` to the repo's `requiredCheck`. A release is cut at the newest `from` commit where `check` is green; `null` cuts at the tip. A repo whose `from` equals `to` has no promotion PR.
+`repos[].release`: `{ "enabled", "time", "readEveryMinutes", "from", "to", "check", "signal" }`. `enabled`, `time` and `readEveryMinutes` default to the top-level `release`; `from` to `baseBranch`; `to` to `"main"`; `check` to the repo's `requiredCheck`; `signal` to `"merged"`. A release is cut at the newest `from` commit where `check` is green; `null` cuts at the tip. A repo whose `from` equals `to` has no promotion PR.
+
+`signal` decides when a closed issue loses `q:promote`:
+
+- `"merged"`: its PR is no longer ahead of `to`.
+- `{ "workflow": "cd.yml" }`: as `"merged"`, and the newest completed run of that workflow on `to` succeeded on a commit that contains the PR's merge commit. A failed newest run, or no successful run that contains the PR yet, keeps the label. Cancelled and skipped runs are passed over. Checked at most every `readEveryMinutes`.
+
+Any other value is refused.
 
 ### `repos[].watch`
 
@@ -195,6 +203,7 @@ GC skips the checkout itself, worker worktrees and locked worktrees (a Claude Co
 | `paths.db`             | `<home>/cambium.db`      | SQLite store: workers, mode, the daily cost ledger.     |
 | `paths.heartbeat`      | `<home>/state.json`      | [Heartbeat](/reference/cambium/heartbeat/) file.        |
 | `paths.queues`         | `<home>/queues.json`     | [Queue view](/reference/cambium/heartbeat/#queue-view-queuesjson) canopy reads. |
+| `paths.snapshots`      | `<home>/snapshots.json`  | [Snapshots](/reference/cambium/heartbeat/#snapshots-snapshotsjson) `run --follow` reads. |
 | `paths.logs`           | `<home>/logs`            | Daemon and worker logs.                                 |
 | `logs.keepPerIssue`    | `20`                     | Worker runs kept per issue.                             |
 | `logs.daemonMaxBytes`  | `10485760`               | Daemon log rotation size.                               |

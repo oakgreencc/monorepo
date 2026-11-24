@@ -1,6 +1,6 @@
 {
   "name": "@oakgreencc/cambium",
-  "version": "0.0.55",
+  "version": "0.0.57",
   "description": "The scheduler daemon: reads the q:* queues from GitHub every tick, runs headless claude workers in their own worktrees up to a cap, and makes every queue transition itself.",
   "license": "AGPL-3.0-only",
   "type": "module",

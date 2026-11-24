@@ -10,13 +10,18 @@ import { join, resolve } from 'node:path'
 /**
  * @typedef {{
  *   enabled: boolean, time: string, from: string, to: string, check: string | null, readEveryMinutes: number,
+ *   signal: PromotionSignal,
  * }} RepoRelease
  *   The promotion PR (`engine: "graph"`): `from` (default: the repo's `baseBranch`) is promoted into `to`
  *   (default `main`) once a day at `time`. `enabled`/`time` default to the top-level `release`. Off when
  *   `from === to`. `check` (default: the repo's `requiredCheck`): the check that must be green on the `from`
  *   commit a release is cut at; `null` cuts at the tip. `readEveryMinutes` (default: the top-level `release`, 5):
  *   how often the snapshot reads the promotion part (github.mjs); between reads the last answer is kept, and a
- *   merge into `from` or `to` forces a read on the next tick. `0` reads every tick.
+ *   merge into `from` or `to` forces a read on the next tick. `0` reads every tick. `signal` (default `"merged"`):
+ *   when a closed issue's `q:promote` comes off (promotion.mjs).
+ * @typedef {'merged' | { workflow: string }} PromotionSignal
+ *   `"merged"`: once its PR is no longer ahead of `to`. `{ workflow }`: once, in addition, the newest completed run
+ *   of that workflow (file name or id) on `to` succeeded on a commit that contains the PR's merge commit.
  * @typedef {'none' | 'green'} MergePolicy
  *   Who merges a Task PR. `none`: not cambium (a merge queue, auto-merge, or a human; past `mergeQueueMinutes`
  *   the issue goes to `q:human`). `green`: cambium, once its checks are green, through `graft pr merge --auto`
@@ -58,7 +63,7 @@ import { join, resolve } from 'node:path'
  *   stall: import('./stall.mjs').StallConfig,
  *   intake: { adopt: boolean, ignoreLabels: string[] },
  *   rescue: RescueConfig,
- *   paths: { home: string, db: string, heartbeat: string, queues: string, logs: string },
+ *   paths: { home: string, db: string, heartbeat: string, queues: string, snapshots: string, logs: string },
  *   logs: { keepPerIssue: number, daemonMaxBytes: number },
  *   graft: { command: string, app: string | null, botLogin: string | null },
  *   worker: { command: string, args: string[], graftApp: string | null, fetch: boolean, env: Record<string, string> },
@@ -137,6 +142,7 @@ export function defaults(home = DEFAULT_HOME) {
       db: join(home, 'cambium.db'),
       heartbeat: join(home, 'state.json'),
       queues: join(home, 'queues.json'),
+      snapshots: join(home, 'snapshots.json'),
       logs: join(home, 'logs'),
     },
     logs: { keepPerIssue: 20, daemonMaxBytes: 10 * 1024 * 1024 },
@@ -224,7 +230,7 @@ export function resolveConfig(raw = {}) {
   const home = untilde(raw?.paths?.home ?? DEFAULT_HOME)
   /** @type {Config} */
   const config = merge(defaults(home), raw)
-  for (const k of /** @type {const} */ (['home', 'db', 'heartbeat', 'queues', 'logs']))
+  for (const k of /** @type {const} */ (['home', 'db', 'heartbeat', 'queues', 'snapshots', 'logs']))
     config.paths[k] = untilde(config.paths[k])
   if (!/^\d{2}:\d{2}$/.test(config.release.time)) throw new Error(`config: release.time must be HH:MM`)
   // Removed: the stall fallback (stall.*) replaced the daily re-triage. An old file's key is ignored.
@@ -252,6 +258,7 @@ export function resolveConfig(raw = {}) {
       to: 'main',
       check: requiredCheck,
       ...r.release,
+      signal: releaseSignal(r.slug, r.release?.signal),
     }
     if (!/^\d{2}:\d{2}$/.test(release.time)) throw new Error(`config: repo ${r.slug} release.time must be HH:MM`)
     if (!(typeof release.readEveryMinutes === 'number' && release.readEveryMinutes >= 0))
@@ -303,6 +310,21 @@ export function resolveConfig(raw = {}) {
   if (merging.length && config.engine !== 'graph')
     throw new Error(`config: merge "green" (${merging.map((r) => r.slug).join(', ')}) needs engine "graph"`)
   return config
+}
+
+/**
+ * `repos[].release.signal`: `"merged"` (also when absent) or `{ "workflow": "<file or id>" }`; anything else throws.
+ * @param {string} slug @param {unknown} raw @returns {PromotionSignal}
+ */
+function releaseSignal(slug, raw) {
+  if (raw === undefined || raw === 'merged') return 'merged'
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const { workflow, ...rest } = /** @type {Record<string, unknown>} */ (raw)
+    if (typeof workflow === 'string' && workflow && !Object.keys(rest).length) return { workflow }
+  }
+  throw new Error(
+    `config: repo ${slug} release.signal must be "merged" or { "workflow": "<file>.yml" }, got ${JSON.stringify(raw)}`,
+  )
 }
 
 /** @param {string} path */
