@@ -455,8 +455,9 @@ function header(s, now) {
     }
   }
   const gh = s.github
-  kids.push(h('span', { class: 'faint', style: 'margin-left:auto', title: s.cacheMs ? 'Each repo is re-read from GitHub at most every ' + dur(s.cacheMs) : null },
-    gh.fetchedAt ? 'GitHub read ' + ago(gh.fetchedAt, now) : 'GitHub not read yet'))
+  const fromCambium = gh.source === 'cambium'
+  kids.push(h('span', { class: 'faint', style: 'margin-left:auto', title: fromCambium ? "Queues from cambium's queue view, written every tick" : s.cacheMs ? 'Each repo is re-read from GitHub at most every ' + dur(s.cacheMs) : null },
+    gh.fetchedAt ? (fromCambium ? 'queues read by cambium ' : 'GitHub read ') + ago(gh.fetchedAt, now) : 'GitHub not read yet'))
   return h('header', {}, kids)
 }
 
@@ -467,6 +468,7 @@ function banners(s, now) {
   const hb = s.heartbeat
   if (hb.status !== 'ok') out.push(h('div', { class: 'banner err' }, h('b', {}, (HB_TITLE[hb.status] || 'Heartbeat ' + hb.status) + ': '), hb.message))
   else if (hb.stale) out.push(h('div', { class: 'banner warn' }, h('b', {}, 'cambium may have stopped: '), hb.message))
+  if (s.github.fallback) out.push(h('div', { class: 'banner warn', 'data-fallback': '' }, h('b', {}, 'Queues read from GitHub: '), s.github.fallback))
   for (const r of s.github.repos) if (!r.ok) out.push(h('div', { class: 'banner err' }, h('b', {}, 'GitHub read failed for ' + r.slug + ': '), r.error,
     r.fetchedAt ? '. Showing what it returned ' + ago(r.fetchedAt, now) + '.' : ". Its issues and PRs aren't shown."))
   for (const r of (hb.data && hb.data.repos) || []) if (!r.ok) out.push(h('div', { class: 'banner warn' }, h('b', {}, 'cambium could not read ' + r.slug + ': '), r.error || 'no reason given'))

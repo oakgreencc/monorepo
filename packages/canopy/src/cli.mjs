@@ -8,22 +8,25 @@ import { resolveSettings } from './config.mjs'
 import { cachedIssues, cachedQueues, DEFAULT_TTL_MS, graftClient, MIN_TTL_MS } from './github.mjs'
 import { logPath, plist, plistPath } from './launchd.mjs'
 import { createApp, DEFAULT_HOST, DEFAULT_PORT } from './server.mjs'
+import { snapshotQueues } from './snapshot.mjs'
 import { traceStore } from './traces.mjs'
 
 export const HELP = `canopy — a local read-only page over cambium's heartbeat and the GitHub queues
 
-usage: canopy [--port <n>] [--host <addr>] [--state <file>] [--traces <file>] [--intake <file>] [--config <file>] [--repo <owner/name>]... [--cache <seconds>]
+usage: canopy [--port <n>] [--host <addr>] [--state <file>] [--queues <file>] [--traces <file>] [--intake <file>] [--config <file>] [--repo <owner/name>]... [--cache <seconds>]
        canopy install [--dry-run] [same flags]   write the launchd agent, serving with those flags
                                                  (start it: oakgreen start canopy; --dry-run prints it)
 
   --port <n>         listen port (default ${DEFAULT_PORT})
   --host <addr>      listen address (default ${DEFAULT_HOST}; loopback only unless you say otherwise)
   --state <file>     cambium heartbeat (default: paths.heartbeat from the cambium config, else ~/.cambium/state.json)
+  --queues <file>    cambium's queue view, read instead of GitHub while fresh (default: paths.queues from the
+                     cambium config, else <paths.home>/queues.json)
   --traces <file>    OTLP/JSON spans from cambium's collector (default: <paths.home>/otel/traces.jsonl)
   --intake <file>    mycelium's status file (default: $MYCELIUM_STATUS, else ~/.mycelium/status.json)
   --config <file>    cambium config (default: $CAMBIUM_CONFIG, else ~/.cambium/config.json)
   --repo <o/n>       repository to show queues for; repeatable (default: the config's repos, else the heartbeat's)
-  --cache <seconds>  how long a GitHub answer is reused (default ${DEFAULT_TTL_MS / 1000}, minimum ${MIN_TTL_MS / 1000})
+  --cache <seconds>  how long a GitHub answer is reused, when canopy reads GitHub itself (default ${DEFAULT_TTL_MS / 1000}, minimum ${MIN_TTL_MS / 1000})
   --graft <cmd>      graft binary (default: graft on PATH)
 
 Reads only. Open http://<host>:<port>/ ; the page polls /api/state (and /api/traces on the Traces tab, /api/issue/<owner>/<name>/<n> for the Inbox pane).
@@ -68,6 +71,7 @@ export function main(
         port: { type: 'string' },
         host: { type: 'string' },
         state: { type: 'string' },
+        queues: { type: 'string' },
         traces: { type: 'string' },
         intake: { type: 'string' },
         config: { type: 'string' },
@@ -110,6 +114,7 @@ export function main(
     settings = resolveSettings(
       {
         state: values.state,
+        queues: values.queues,
         traces: values.traces,
         intake: values.intake,
         config: values.config,
@@ -133,7 +138,10 @@ export function main(
   }
   const host = values.host ?? DEFAULT_HOST
   const gh = client ?? graftClient({ bin: values.graft ?? 'graft' })
-  const queues = cachedQueues({ client: gh, ttlMs: cacheS * 1000 })
+  const queues = snapshotQueues({
+    path: settings.queuesPath,
+    github: cachedQueues({ client: gh, ttlMs: cacheS * 1000 }),
+  })
   const issues = cachedIssues({ client: gh, ttlMs: cacheS * 1000 })
   const notes = settings.configError ? [settings.configError] : []
   const server = createApp({
