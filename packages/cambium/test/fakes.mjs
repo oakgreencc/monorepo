@@ -7,6 +7,7 @@
 import { resolveConfig } from '../src/config.mjs'
 import { resolveConvention } from '../src/convention.mjs'
 import { parseDecideMarker } from '../src/graphs/decide.mjs'
+import { parseAnswer } from '../src/human-reply.mjs'
 import { parseMarker } from '../src/marker.mjs'
 import { openStore } from '../src/store.mjs'
 
@@ -153,6 +154,16 @@ export function fakeGitHub({ issues = [], prs = [] } = {}) {
     async writeState(slug, number, commentId, body) {
       calls.push({ op: 'writeState', args: [slug, number, commentId, body] })
       const i = /** @type {Required<FakeIssue>} */ (store.get(number))
+      // A decide marker or an answer is an ordinary comment (decide-session.mjs), not the state comment.
+      if (parseDecideMarker(body) || parseAnswer(body)) {
+        const at = commentId ? i.comments.findIndex((c) => c.id === commentId) : -1
+        if (commentId && at === -1) throw new Error(`no comment ${commentId}`)
+        const id = commentId ?? nextComment++
+        const c = { id, author: 'james', bot: false, createdAt: new Date(T0).toISOString(), body }
+        if (at === -1) i.comments.push(c)
+        else i.comments[at] = c
+        return id
+      }
       if (commentId && i.comment?.id !== commentId) throw new Error(`no comment ${commentId}`)
       const id = commentId ?? nextComment++
       i.comment = { id, body }

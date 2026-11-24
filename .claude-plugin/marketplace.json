@@ -12,7 +12,7 @@
     {
       "name": "oakgreen",
       "source": "./packages/plugin",
-      "description": "Set up the oakgreen stack on this machine: a guided wizard over the oakgreen CLI for graft, cambium, tracing, mycelium, canopy, canker and deadwood."
+      "description": "Set up the oakgreen stack on this machine, and work cambium's Human Queue decisions from Claude Code: a guided setup wizard over the oakgreen CLI, and /oakgreen:decide, which walks a person to a decision through cambium's decide graph."
     }
   ]
 }

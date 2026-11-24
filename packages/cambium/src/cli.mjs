@@ -4,7 +4,7 @@
  * the config, the store and the heartbeat file goes through `io`, so tests
  * drive it with fakes.
  */
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,6 +15,8 @@ import { plist, plistPath } from './launchd.mjs'
 import { openStore } from './store.mjs'
 import { finish, newCtx, startTask } from './tick.mjs'
 import { REPO_GRAPHS, runIssue } from './graph-engine.mjs'
+import { advanceDecision, describePosition, load as loadDecision } from './decide-session.mjs'
+import { graftGitHub } from './github.mjs'
 import { heartbeatFresh } from './snapshot-file.mjs'
 import { createTelemetry } from './tracing.mjs'
 import { defaultExec, realUpdater, runUpdate, VERSION } from './update.mjs'
@@ -41,6 +43,11 @@ export const HELP = `cambium ${VERSION} — the scheduler daemon
   cambium run rescue [--repo <owner/name>] [--issue <n>]
                                         engine "graph": list the stuck issues and PRs (changes nothing); with
                                         --issue, rescue that one now with a foreground rescue worker
+  cambium decide show <owner/repo#n> [--json] [--lens <product|technical>]
+                                        where the issue's decision stands, and the output its next node takes
+  cambium decide advance <owner/repo#n> --output <file|-> [--as <login>] [--lens <product|technical>]
+                                        check the session's output for the current node against its schema,
+                                        follow the edge, write the cambium:decide marker, print the next node
   cambium gc [--dry-run] [--repo <owner/name>]
                                         remove worktrees GitHub holds all of; archive (to ~/.cambium/gc) then
                                         remove stale ones; skip live workers and live Claude Code sessions
@@ -89,6 +96,7 @@ async function withTelemetry(deps, io, fn) {
  *   updater?: import('./update.mjs').Updater,
  *   exec?: import('./update.mjs').Exec,
  *   uid?: number,
+ *   stdin?: () => Promise<string>,
  * }} IO
  */
 
@@ -153,6 +161,8 @@ export async function main(argv, io) {
       return runOne(config, rest, io, depsFor)
     case 'gc':
       return gc(config, rest, io, depsFor)
+    case 'decide':
+      return decideCmd(config, rest, io)
     case 'install':
       return install(cfgPath, config, io, has(rest, '--dry-run'))
   }
@@ -177,6 +187,58 @@ async function gc(config, argv, io, depsFor) {
   } finally {
     deps.store.close?.()
   }
+}
+
+/** All of stdin. */
+async function readStdin() {
+  let text = ''
+  for await (const chunk of process.stdin) text += chunk
+  return text
+}
+
+/**
+ * `decide show|advance <owner/repo#n>`: the terminal driver of the decide graph (decide-session.mjs). The repo need
+ * not be in the config; a bare `<n>` (or `#<n>`) names an issue of the only configured repo.
+ * @param {import('./config.mjs').Config} config @param {string[]} argv @param {IO} io
+ */
+async function decideCmd(config, argv, io) {
+  const [sub, ref] = argv
+  const usage =
+    'usage: cambium decide show <owner/repo#n> [--json]\n       cambium decide advance <owner/repo#n> --output <file|-> [--as <login>]'
+  const m = /^(?:([\w.-]+\/[\w.-]+))?#?(\d+)$/.exec(ref ?? '')
+  if ((sub !== 'show' && sub !== 'advance') || !m) return fail(io, usage)
+  const slug = m[1] ?? (config.repos.length === 1 ? config.repos[0].slug : undefined)
+  if (!slug) return fail(io, `name the repo: <owner/repo>#${m[2]}`)
+  const number = Number(m[2])
+  const name = `${slug}#${number}`
+  const github = io.deps ? io.deps(config).github : graftGitHub({ config })
+  const holder = flag(argv, '--as') ?? io.env.GITHUB_USER ?? io.env.USER ?? 'someone'
+  const d = { github, slug, number, holder, home: config.paths.home, now: io.now, lens: flag(argv, '--lens') }
+  if (sub === 'show') {
+    const loaded = await loadDecision(d)
+    if (!loaded.ok) return fail(io, loaded.error)
+    if (has(argv, '--json'))
+      io.out(JSON.stringify({ node: loaded.pos.node, marker: loaded.marker, state: loaded.pos.input }, null, 2))
+    else io.out(describePosition(name, loaded.pos, loaded.marker))
+    return 0
+  }
+  const output = flag(argv, '--output')
+  let raw = null
+  try {
+    raw = output === undefined ? null : output === '-' ? await (io.stdin ?? readStdin)() : readFileSync(output, 'utf8')
+  } catch (err) {
+    return fail(io, `--output ${output}: ${/** @type {Error} */ (err).message}`)
+  }
+  const r = await advanceDecision(d, raw)
+  if (!r.ok) {
+    if (!r.issues) return fail(io, r.error)
+    io.err(`cambium: refused: this is not a valid ${r.node} output; the checkpoint is unchanged`)
+    for (const i of r.issues) io.err(`  - ${i}`)
+    return 1
+  }
+  if (r.path.length) io.out(`ran ${r.path.join(' → ')}`)
+  io.out(describePosition(name, { node: r.marker.node, input: r.marker.input }, r.marker))
+  return 0
 }
 
 /** @param {IO} io @param {string} msg */
