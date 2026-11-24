@@ -5,6 +5,7 @@
  * commenting; cambium sends the issue back to triage at once and quotes the reply in the triage prompt
  * (dispatch-engine.mjs `wake`, graphs/dispatch.mjs `start-triage`).
  */
+import { parseDecideMarker } from './graphs/decide.mjs'
 import { parseMarker } from './marker.mjs'
 
 /**
@@ -36,7 +37,8 @@ export function stateSince(m) {
 
 /**
  * The human replies on `issue` written after `since`, oldest first. Never cambium's: not by `botLogin`, not by the
- * login that wrote the state comment, not a `Bot`-type author, and not a comment carrying a state marker. No `since`:
+ * login that wrote the state comment, not a `Bot`-type author, and not a comment carrying a state marker or a
+ * `cambium:decide` marker (graphs/decide.mjs). No `since`:
  * none (nothing to be a reply to).
  * @param {Issue} issue @param {{ since: string | null, botLogin?: string | null }} o @returns {Comment[]}
  */
@@ -46,7 +48,13 @@ export function humanReplies(issue, { since, botLogin = null }) {
   if (!Number.isFinite(after)) return []
   const self = new Set([botLogin, issue.stateComment?.author].filter(Boolean))
   return (issue.comments ?? []).filter(
-    (c) => !!c.author && !c.bot && !self.has(c.author) && !parseMarker(c.body) && Date.parse(c.createdAt) > after,
+    (c) =>
+      !!c.author &&
+      !c.bot &&
+      !self.has(c.author) &&
+      !parseMarker(c.body) &&
+      !parseDecideMarker(c.body) &&
+      Date.parse(c.createdAt) > after,
   )
 }
 

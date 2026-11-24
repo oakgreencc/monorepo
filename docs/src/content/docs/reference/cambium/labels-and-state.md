@@ -115,6 +115,20 @@ A worker with no `result` event (killed, or its log truncated) adds nothing. A m
 
 With `graft.botLogin` set, only markers written by that login are trusted.
 
+## Decision comment
+
+An interactive decision on an `ask:decide` + `ask:session` issue keeps its own comment, edited in place: a readable line, then a hidden `<!-- cambium:decide {…} -->` marker holding the whole decision. Any session can resume from it alone.
+
+| Field     | Meaning                                                                                           |
+| --------- | ------------------------------------------------------------------------------------------------- |
+| `node`    | Where the decision rests in the `decide` graph.                                                   |
+| `status`  | `leased` (in progress), `paused` (idle; a reply resumes it) or `done`.                            |
+| `outcome` | Once `done`: `answered` or `abandoned`.                                                           |
+| `input`   | The decision so far: facts, question rounds and answers, the draft, and the lease.                |
+| `error`   | The error the last turn stopped on, if any.                                                       |
+
+While the decision is `leased` or `paused`, a reply on the issue does not send it back to triage. A decision with no reply for its idle timeout (default 24 hours) pauses. See the [cambium README](https://github.com/oakgreencc/monorepo/tree/main/packages/cambium#the-decide-graph).
+
 ## Requeue
 
 A requeue sets `q:task` with `attempt + 1`. Once `maxAttempts` are spent: `q:human` + `why:budget`. During a [red base](/explanation/merging-and-red-base/) a failure requeues at the same attempt (`base-red`).

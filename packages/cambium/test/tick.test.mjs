@@ -643,7 +643,7 @@ scenario('heartbeat: the documented shape', async () => {
   assert.equal(s.engine, h.config.engine)
   assert.deepEqual(
     s.graphs.map((g) => g.name),
-    Object.keys(GRAPHS),
+    [...Object.keys(GRAPHS), 'decide'],
   )
   for (const g of s.graphs) {
     assert.ok(g.about, `${g.name} has an about`)

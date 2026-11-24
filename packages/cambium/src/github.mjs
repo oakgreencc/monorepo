@@ -9,15 +9,18 @@ import { spawn } from 'node:child_process'
 import { parseMarker } from './marker.mjs'
 import { Q, QUEUE_LABELS, RUNNING } from './labels.mjs'
 import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
+import { parseDecideMarker } from './graphs/decide.mjs'
 
 /**
  * @typedef {{
  *   number: number, title: string, url: string, state: 'OPEN' | 'CLOSED', createdAt: string, body: string,
  *   labels: string[], stateComment: { id: number, marker: import('./marker.mjs').Marker, author?: string | null } | null,
  *   blockedBy: Blocker[], comments?: Comment[], updatedAt?: string | null,
+ *   decideComment?: { id: number, marker: import('./graphs/decide.mjs').DecideMarker } | null,
  * }} Issue
  *   `stateComment.author`: the login that wrote the state comment (cambium's). `comments`: the newest 20, oldest
- *   first, for human-reply detection (human-reply.mjs).
+ *   first, for human-reply detection (human-reply.mjs). `decideComment`: the `cambium:decide` marker of a decision
+ *   on the issue (graphs/decide.mjs), from any author: drivers on other channels write as their own login.
  * @typedef {{ id?: number, author: string | null, bot: boolean, createdAt: string, body: string }} Comment
  *   `bot`: GitHub says the author is a `Bot` (an App). `id`: GitHub's database id (triage-inputs.mjs).
  * @typedef {{ number: number, state: 'OPEN' | 'CLOSED', closedAt: string | null, title?: string, url?: string }} Blocker
@@ -308,6 +311,15 @@ function stateCommentOf(n, botLogin) {
     : null
 }
 
+/**
+ * The last comment holding a `cambium:decide` marker. @param {any} n an issue node with `comments`
+ * @returns {{ id: number, marker: import('./graphs/decide.mjs').DecideMarker } | null}
+ */
+function decideCommentOf(n) {
+  const comment = (n.comments?.nodes ?? []).findLast((/** @type {any} */ c) => parseDecideMarker(c?.body))
+  return comment ? { id: comment.databaseId, marker: /** @type {any} */ (parseDecideMarker(comment.body)) } : null
+}
+
 /** @param {any} n @returns {string[]} */
 const labelsOf = (n) => (n.labels?.nodes ?? []).map((/** @type {any} */ l) => l.name)
 
@@ -376,6 +388,7 @@ function toIssue(n, botLogin) {
     body: n.body ?? '',
     labels: labelsOf(n),
     stateComment: stateCommentOf(n, botLogin),
+    decideComment: decideCommentOf(n),
     blockedBy: (n.blockedBy?.nodes ?? []).filter(Boolean).map((/** @type {any} */ b) => ({
       number: b.number,
       state: b.state === 'OPEN' ? 'OPEN' : 'CLOSED',

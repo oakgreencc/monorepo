@@ -7,6 +7,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { resolveConfig } from '../src/config.mjs'
+import { END } from '../src/graph/index.mjs'
+import { markerAt, renderDecideMarker } from '../src/graphs/decide.mjs'
 import { newMarker, renderMarker } from '../src/marker.mjs'
 import { loopsOf, STALL_LABEL } from '../src/stall.mjs'
 import { tick } from '../src/tick.mjs'
@@ -16,6 +18,12 @@ import { harness, SLUG, T0 } from './fakes.mjs'
 const MIN = 60_000
 const HOUR = 60 * MIN
 const at = (/** @type {number} */ ms) => new Date(ms).toISOString()
+
+const DECIDE_SEED = {
+  issue: { repo: SLUG, number: 41, question: 'Which one?', options: [] },
+  lens: /** @type {const} */ ('technical'),
+  channel: 'github',
+}
 
 /** @param {{ issues?: any[], prs?: any[], config?: any }} seed */
 const graph = ({ issues = [], prs = [], config = {} }) =>
@@ -304,4 +312,21 @@ test('stall.everyMinutes 0 turns the fallback off', async () => {
   await tick(h.deps)
   assert.equal(creates(h).length, 0)
   assert.deepEqual(stallOf(h), { checkedAt: null, starved: null, loops: [] })
+})
+
+test('chain to q:human: a live decision on the end issue holds off its re-triage; a done one does not', async () => {
+  for (const [status, retriaged] of /** @type {const} */ ([
+    ['leased', false],
+    ['done', true],
+  ])) {
+    const h = await chainToHuman()
+    const m = markerAt({ node: status === 'done' ? END : 'await-answers', input: DECIDE_SEED }, { now: () => T0 })
+    h.gh.issue(41).comments = [
+      { author: 'james', bot: false, createdAt: at(T0 - HOUR), body: renderDecideMarker({ ...m, status }) },
+    ]
+    await tick(h.deps)
+    h.gh.issue(41).body = 'Edited: the second one.'
+    await next(h)
+    assert.deepEqual(h.gh.issue(41).labels.sort(), retriaged ? ['q:intake'] : ['q:human', 'why:triage'], status)
+  }
 })

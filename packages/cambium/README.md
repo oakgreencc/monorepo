@@ -678,6 +678,71 @@ A label change counts after `rescue.graceMinutes` (default 30) since the issue's
 
 **Report.** Last, a comment on the item: what cambium saw, how it got stuck, what rescue did, and the root-cause tickets.
 
+## The decide graph
+
+Some `q:human` issues can only be answered by a person, and a live session with the code helps: triage's `ask: decide` with `interactive: true` (labels `ask:decide` + `ask:session`). The `decide` graph (`src/graphs/decide.mjs`) walks a person to a decision and writes it back. It **only decides**: it never builds. Waits are the person's turns, on whatever channel hosts the session (Claude Code terminal, GitHub comments, Discord, web chat). The tick does not run it: a session driver does (no driver ships yet), so it is not a `cambium run` graph, but the heartbeat describes it with the others.
+
+```mermaid
+flowchart TD
+  start_(["q:human"])
+  n0["open"]
+  n1["orient"]
+  n2["mock"]
+  n3["ask-round"]
+  n4{{"await-answers"}}
+  n5["apply-answers"]
+  n6["draft"]
+  n7{{"confirm"}}
+  n8["commit"]
+  n9["abandon"]
+  n10{{"paused"}}
+  end_(("end"))
+  start_ --> n0
+  n0 --> n1
+  n1 -->|"visual"| n2
+  n1 --> n3
+  n2 --> n3
+  n3 --> n4
+  n4 -->|"idle"| n10
+  n4 -->|"abandoned"| n9
+  n4 --> n5
+  n5 -->|"needsFacts"| n1
+  n5 -->|"settled"| n6
+  n5 --> n3
+  n6 --> n7
+  n7 -->|"idle"| n10
+  n7 -->|"accepted"| n8
+  n7 -->|"abandoned"| n9
+  n7 -->|"edited"| n6
+  n7 --> n6
+  n10 -->|"atConfirm"| n7
+  n10 --> n4
+  n8 --> end_
+  n9 --> end_
+```
+
+| Node            | Kind | Does                                                                                                                             |
+| --------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `open`          | step | Takes the lease and seeds the decision from the issue and its session brief.                                                     |
+| `orient`        | step | Facts the ask depends on, from the sources the lens names, each with a source (file:line, route, URL); re-costs the options.     |
+| `mock`          | step | Static HTML for each option; only when the ask is `visual`.                                                                      |
+| `ask-round`     | step | Up to 5 numbered questions, each with a recommendation worded so "yes" accepts; posted to the channel.                           |
+| `await-answers` | wait | The next reply on the channel. A reply starting `stop` or `abandon` abandons.                                                    |
+| `apply-answers` | step | Maps the reply onto the questions and recomputes `decided` / `frontier`; a factual question (`needFacts`) goes back to `orient`. |
+| `draft`         | step | The decision: choice, in and out of scope, acceptance checks, follow-up issues; posted to the channel.                           |
+| `confirm`       | wait | yes / edit / abandon on the draft.                                                                                               |
+| `commit`        | step | Plain code: files the follow-ups as `q:intake`, then posts the answer comment. Ends the graph.                                   |
+| `abandon`       | step | Ends without an answer; the issue stays in `q:human`.                                                                            |
+| `paused`        | wait | An idle decision: holds until the next reply, then resumes the wait it left.                                                     |
+
+Nodes call only what the driver injects: `ctx.agent(node, state)` (a schema-checked agent turn), `ctx.channel.post` / `ctx.channel.poll`, `ctx.commit`, and `ctx.now`. Every node's input and output is the whole `State` (zod).
+
+**Marker and resume.** The checkpoint after every stop is a `cambium:decide` marker: one comment on the issue, edited in place, with a readable line and the hidden JSON `{ v: 1, graph: "decide", graphVersion, node, status, outcome, at, error, input }`. `input` is the whole state, so a fresh driver on any channel resumes from the marker alone (`parseDecideMarker`, `positionOf`), without asking anything already answered. `driveDecide` runs one turn and writes the marker before any label change. `status` is `leased`, `paused` or `done` (`outcome` `answered` or `abandoned`). A node error is recorded in `error` at the failed node; the next turn retries it.
+
+**Lease and `paused`.** `open` records the lease in the state: `holder` (`ctx.holder`, default `cambium`), when it was taken, when the channel was last active, and `idleMs` (`ctx.idleMs`, default 24 h). Every step refreshes it. A wait that sees no reply for `idleMs` moves to `paused`, which holds however long and resumes the wait it left on the next reply. While a decision is live (`leased` or `paused`), dispatch leaves the issue alone: a reply does not wake it for triage, and the stall fallback does not re-triage it. A `done` marker no longer holds anything off.
+
+**Lens.** `lens` (`product` | `technical`) says what kind of decision it is. It changes what `orient` researches (product and design docs and the glossary, or code, APIs and ADRs) and the template `draft` writes (a brief-shaped decision, or an ADR-shaped one). It never changes the graph.
+
 ## Graph module (preview)
 
 `@oakgreencc/cambium/graph` is the start of typed workflows: nodes with schemas, edges as data, and a loop that advances a position through them. The Task phase runs on it with `engine: "graph"` ([The task graph](#the-task-graph)).

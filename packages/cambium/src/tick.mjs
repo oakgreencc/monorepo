@@ -20,6 +20,7 @@ import { adopt } from './adopt.mjs'
 import { branchName } from './convention.mjs'
 import { PREPARE_FAILED_LINE } from './prepare.mjs'
 import { releaseDue, releaseNotBuilt } from './phases/release.mjs'
+import { decide } from './graphs/decide.mjs'
 import { releaseGraphs } from './graphs/release.mjs'
 import { DISPATCH_NOT_BUILT, dispatchNotBuilt } from './phases/dispatch.mjs'
 import { isRepair } from './base-health.mjs'
@@ -901,9 +902,12 @@ function countsOf(snap) {
 
 /** @type {import('./graph/describe.mjs').GraphDescription[] | undefined} */
 let described
-/** Every graph cambium defines, as plain JSON; built once, on first use (graph-engine.mjs imports this file). */
+/**
+ * Every graph cambium defines, as plain JSON; built once, on first use (graph-engine.mjs imports this file). `decide`
+ * is driven by a session, not the tick, so it is not in GRAPHS (`cambium run`), but canopy shows it all the same.
+ */
 const graphDescriptions = () => {
-  described ??= Object.values(GRAPHS).map(describeGraph)
+  described ??= [...Object.values(GRAPHS), decide].map(describeGraph)
   return described
 }
 
