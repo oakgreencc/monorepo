@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { resolveConfig } from '../src/config.mjs'
 import { graftGitHub, normalize } from '../src/github.mjs'
+import { promotionMoves } from '../src/promotion.mjs'
 import { tick } from '../src/tick.mjs'
 import { harness, SLUG } from './fakes.mjs'
 
@@ -142,4 +143,178 @@ test('the read asks for the comparison and the closed q:promote issues whenever 
   await gh.read('o/m')
   assert.equal(JSON.parse(argv[1][3]).release, false)
   assert.equal(normalize({ repository: { awaiting: answer.repository.awaiting } }).issues.get(5)?.number, 5)
+})
+
+/** A develop → main answer: `#5` waits in q:promote for PR 50; `ahead` lists the PRs on develop not in main. */
+const promoAnswer = (/** @type {{ ahead?: number[], from?: string, to?: string, release?: boolean }} */ o = {}) => {
+  const { ahead = [50], from = 'f1', to = 't1', release = true } = o
+  return {
+    repository: {
+      issues: { nodes: [] },
+      fromTip: { target: { oid: from } },
+      toTip: { target: { oid: to } },
+      ...(release
+        ? {
+            awaiting: {
+              nodes: [
+                {
+                  number: 5,
+                  title: 'T',
+                  url: 'u',
+                  state: 'CLOSED',
+                  labels: { nodes: [{ name: 'q:promote' }] },
+                  comments: {
+                    nodes: [
+                      {
+                        databaseId: 1,
+                        author: { login: 'bot' },
+                        body: renderBack({ v: 1, phase: 'task', stage: 'submitted', attempt: 1, pr: 50, history: [] }),
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+            toRef: {
+              compare: {
+                aheadBy: ahead.length,
+                commits: {
+                  nodes: ahead.map((n) => ({
+                    associatedPullRequests: {
+                      nodes: [{ number: n, title: `P${n}`, baseRefName: 'develop', state: 'MERGED' }],
+                    },
+                  })),
+                },
+              },
+            },
+          }
+        : {}),
+    },
+  }
+}
+
+/** A graft client over a develop → main repo, a settable clock and settable answers. */
+function keptClient(/** @type {number | undefined} */ readEveryMinutes = undefined) {
+  /** @type {any[]} */
+  const vars = []
+  const state = { now: 0, ahead: [50], from: 'f1', to: 't1' }
+  const config = resolveConfig({
+    repos: [
+      {
+        slug: 'o/r',
+        path: '/src/r',
+        baseBranch: 'develop',
+        release: { enabled: true, ...(readEveryMinutes === undefined ? {} : { readEveryMinutes }) },
+      },
+      { slug: 'o/m', path: '/src/m', baseBranch: 'main' },
+    ],
+  })
+  const gh = graftGitHub({
+    config,
+    now: () => state.now,
+    exec: async (_cmd, args) => {
+      if (args[0] !== 'graphql') return ''
+      const v = JSON.parse(args[3])
+      vars.push(v)
+      return JSON.stringify(promoAnswer({ ...state, release: v.release }))
+    },
+  })
+  return { gh, vars, state }
+}
+
+test('between release reads: $release false, promotion works from the kept answer; due again after readEveryMinutes', async () => {
+  const { gh, vars, state } = keptClient()
+  const first = await gh.read('o/r')
+  assert.equal(vars[0].release, true)
+  assert.equal(vars[0].tips, true)
+  assert.equal(first.release?.fresh, true)
+  // The PR leaves `from`'s lead in GitHub, but the next read (a minute on) does not ask: the kept answer stands.
+  state.ahead = []
+  state.now = 60_000
+  const skipped = await gh.read('o/r')
+  assert.equal(vars[1].release, false)
+  assert.equal(skipped.release?.fresh, false)
+  assert.deepEqual(skipped.release?.merged, [{ number: 50, title: 'P50' }])
+  assert.deepEqual(skipped.issues.get(5)?.labels, ['q:promote'], 'the kept q:promote issue is still in the snapshot')
+  assert.deepEqual(promotionMoves(skipped).unlabel, [], 'no unlabel from a kept answer that still has PR 50 ahead')
+  // Five minutes after the last read: read again, and the label comes off.
+  state.now = 5 * 60_000
+  const read = await gh.read('o/r')
+  assert.equal(vars[2].release, true)
+  assert.deepEqual(
+    promotionMoves(read).unlabel.map((i) => i.number),
+    [5],
+  )
+  // from = to: never the release part, nor the tips.
+  await gh.read('o/m')
+  assert.deepEqual([vars[3].release, vars[3].tips], [false, false])
+})
+
+test('a skipped tick still labels a newly merged issue from the kept comparison', async () => {
+  const { gh, state } = keptClient()
+  await gh.read('o/r')
+  state.now = 60_000
+  const snap = await gh.read('o/r')
+  snap.issues.set(6, {
+    .../** @type {any} */ (snap.issues.get(5)),
+    number: 6,
+    labels: [],
+    stateComment: { id: 2, marker: /** @type {any} */ ({ pr: 50 }), author: null },
+  })
+  snap.prs.push(/** @type {any} */ ({ number: 50, state: 'MERGED', closes: [6], branch: 'agent/6-x' }))
+  assert.equal(snap.release?.fresh, false)
+  assert.deepEqual(
+    promotionMoves(snap).label.map((i) => i.number),
+    [6],
+  )
+})
+
+test('a merge into `to` or `from` reads the release part on the next tick', async () => {
+  for (const tip of /** @type {const} */ (['to', 'from'])) {
+    const { gh, vars, state } = keptClient(60)
+    await gh.read('o/r')
+    state.now = 60_000
+    state[tip] = `${tip}2`
+    state.ahead = []
+    await gh.read('o/r')
+    assert.equal(vars[1].release, false, `${tip}: the tick that sees the move still uses the kept answer`)
+    state.now = 120_000
+    const next = await gh.read('o/r')
+    assert.equal(vars[2].release, true, `${tip}: the next tick reads`)
+    assert.deepEqual(
+      promotionMoves(next).unlabel.map((i) => i.number),
+      [5],
+    )
+    state.now = 180_000
+    await gh.read('o/r')
+    assert.equal(vars[3].release, false, `${tip}: and then waits again`)
+  }
+})
+
+test('kept release answer: writes keep it honest; readEveryMinutes 0 and { fresh: true } always read', async () => {
+  const { gh, vars, state } = keptClient(60)
+  await gh.read('o/r')
+  // Unlabelling a kept q:promote issue drops it from the kept answer.
+  await gh.label('o/r', 5, { add: [], remove: ['q:promote'] })
+  state.now = 60_000
+  const snap = await gh.read('o/r')
+  assert.equal(vars[1].release, false)
+  assert.equal(snap.issues.has(5), false)
+  // A write to the promotion (a PR opened) reads the next tick.
+  await gh.openPull('o/r', { head: 'release/x', base: 'main', title: 'T', body: 'B' }).catch(() => {})
+  await gh.read('o/r')
+  assert.equal(vars[2].release, true)
+  await gh.read('o/r', { fresh: true })
+  assert.equal(vars[3].release, true)
+  const every = keptClient(0)
+  await every.gh.read('o/r')
+  await every.gh.read('o/r')
+  assert.deepEqual(
+    every.vars.map((v) => v.release),
+    [true, true],
+  )
+  assert.throws(
+    () => resolveConfig({ repos: [{ slug: 'o/r', path: '/r', release: { readEveryMinutes: -1 } }] }),
+    /readEveryMinutes/,
+  )
 })

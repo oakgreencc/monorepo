@@ -231,8 +231,22 @@ test('config: per-repo release defaults to the top-level one, from the base bran
       { slug: 'c/d', path: '/y', release: { enabled: false, to: 'prod' } },
     ],
   })
-  assert.deepEqual(c.repos[0].release, { enabled: true, time: '07:30', from: 'develop', to: 'main', check: 'ci' })
-  assert.deepEqual(c.repos[1].release, { enabled: false, time: '07:30', from: 'main', to: 'prod', check: 'ci' })
+  assert.deepEqual(c.repos[0].release, {
+    enabled: true,
+    time: '07:30',
+    readEveryMinutes: 5,
+    from: 'develop',
+    to: 'main',
+    check: 'ci',
+  })
+  assert.deepEqual(c.repos[1].release, {
+    enabled: false,
+    time: '07:30',
+    readEveryMinutes: 5,
+    from: 'main',
+    to: 'prod',
+    check: 'ci',
+  })
   const d = resolveConfig({
     repos: [
       { slug: 'a/b', path: '/x', requiredCheck: null },

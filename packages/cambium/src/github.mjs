@@ -49,11 +49,12 @@ import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
  *   (no decision against it) a latest review approves and none requests changes.
  * @typedef {{
  *   from: string, to: string, aheadBy: number | null, merged: { number: number, title: string }[],
- *   prs: PromotionPr[],
+ *   prs: PromotionPr[], fresh?: boolean,
  * }} Release
  *   The repo's promotion state (when its `release` is on): how far `from` is ahead of `to` (null: `to` does not
  *   exist), the PRs merged into `from` since `to` (oldest first, from the last 100 commits ahead), and the
  *   promotion PRs: open ones from `from` to `to` plus any (open, merged or closed) still labelled `q:promote`.
+ *   `fresh`: false when this tick did not read it and it is the last read's answer, kept (`release.readEveryMinutes`).
  * @typedef {{
  *   issues: Map<number, Issue>, prs: PullRequest[], release?: Release | null,
  *   base?: import('./base-health.mjs').BaseHealth,
@@ -78,7 +79,7 @@ import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
  *   `files`: how many files differ between the merge base and `head`. `commits`: oldest first, at most 250.
  *   `base`: the base branch's health, when the repo has a `requiredCheck`.
  * @typedef {{
- *   read(slug: string): Promise<Snapshot>,
+ *   read(slug: string, opts?: { fresh?: boolean }): Promise<Snapshot>,
  *   label(slug: string, number: number, change: { add: string[], remove: string[] }): Promise<void>,
  *   writeState(slug: string, number: number, commentId: number | null, body: string): Promise<number>,
  *   close(slug: string, number: number, body: string, opts?: { reason?: 'completed' | 'not_planned' | 'duplicate' }): Promise<void>,
@@ -135,9 +136,10 @@ export const UNQUEUED = 20
 
 /**
  * One query per repo per tick: the queued issues and the agent PRs with their checks; with `$release`, also the
- * promotion PRs and how far `$from` is ahead of `$to` (see {@link Release}).
+ * promotion PRs and how far `$from` is ahead of `$to` (see {@link Release}). With `$tips`, the tips of `$from` and
+ * `$to` (cheap): a change between release reads means a merge, and the next tick reads the release part.
  */
-export const SNAPSHOT_QUERY = `query($owner: String!, $name: String!, $labels: [String!], $release: Boolean!, $from: String!, $to: String!, $health: Boolean!, $baseRef: String!, $check: String!, $adopt: Boolean!, $unqueued: String!) {
+export const SNAPSHOT_QUERY = `query($owner: String!, $name: String!, $labels: [String!], $release: Boolean!, $tips: Boolean!, $from: String!, $to: String!, $health: Boolean!, $baseRef: String!, $check: String!, $adopt: Boolean!, $unqueued: String!) {
   unqueued: search(query: $unqueued, type: ISSUE, first: ${UNQUEUED}) @include(if: $adopt) { nodes { ... on Issue { ...I } } }
   rateLimit { cost remaining resetAt }
   repository(owner: $owner, name: $name) {
@@ -147,6 +149,8 @@ export const SNAPSHOT_QUERY = `query($owner: String!, $name: String!, $labels: [
     promoteRef: pullRequests(headRefName: $from, baseRefName: $to, states: OPEN, first: 10) @include(if: $release) { nodes { ...P } }
     promoteLabelled: pullRequests(labels: ["${Q.promote}"], first: 10, orderBy: { field: UPDATED_AT, direction: DESC }) @include(if: $release) { nodes { ...P } }
     awaiting: issues(labels: ["${Q.promote}"], states: CLOSED, first: 100, orderBy: { field: UPDATED_AT, direction: DESC }) @include(if: $release) { nodes { ...I } }
+    fromTip: ref(qualifiedName: $from) @include(if: $tips) { target { oid } }
+    toTip: ref(qualifiedName: $to) @include(if: $tips) { target { oid } }
     toRef: ref(qualifiedName: $to) @include(if: $release) {
       compare(headRef: $from) {
         aheadBy
@@ -291,8 +295,15 @@ function normalizeRelease(repo, { from, to }, botLogin) {
     aheadBy: compare ? (compare.aheadBy ?? 0) : null,
     merged: [...merged.values()],
     prs: [...prs.values()],
+    fresh: true,
   }
 }
+
+/** The fields of the snapshot's `$release` part, kept between release reads. */
+const RELEASE_FIELDS = /** @type {const} */ (['promoteRef', 'promoteLabelled', 'awaiting', 'toRef'])
+
+/** The tips of `from` and `to` in an answer, as one comparable string. @param {any} repo */
+const tipsOf = (repo) => `${repo?.fromTip?.target?.oid ?? ''}:${repo?.toTip?.target?.oid ?? ''}`
 
 /** An issue node → {@link Issue}. @param {any} n @param {string | null} botLogin @returns {Issue} */
 function toIssue(n, botLogin) {
@@ -485,23 +496,49 @@ export function exec(cmd, args, { input, cwd, env } = {}) {
 /**
  * The default {@link GitHub}: every call is one `graft` invocation.
  *
- * @param {{ config: import('./config.mjs').Config, exec?: Exec }} opts
+ * The `$release` part of a repo's snapshot (promotion: `from` ≠ `to`) is read every `release.readEveryMinutes`;
+ * between reads the last answer is kept in memory and reused (its {@link Release} `fresh: false`). A read is
+ * forced on the next tick when the tips of `from` or `to` moved (a merge), when cambium wrote to a promotion PR,
+ * or by `read(slug, { fresh: true })`. A write to a kept `q:promote` issue drops it from the kept answer.
+ *
+ * @param {{ config: import('./config.mjs').Config, exec?: Exec, now?: () => number }} opts
  * @returns {GitHub}
  */
-export function graftGitHub({ config, exec: run = exec }) {
+export function graftGitHub({ config, exec: run = exec, now = Date.now }) {
   const env = { ...process.env, ...(config.graft.app ? { GRAFT_APP: config.graft.app } : {}) }
   const cwdOf = (/** @type {string} */ slug) => config.repos.find((r) => r.slug === slug)?.path
   const graft = (/** @type {string} */ slug, /** @type {string[]} */ args, input = undefined) =>
     run(config.graft.command, [...args, '--repo', slug], { input, cwd: cwdOf(slug), env })
   const json = async (/** @type {Promise<string>} */ p) => JSON.parse(await p)
+  /** @type {Map<string, { at: number, tips: string, part: Record<string, any>, dirty: boolean }>} */
+  const kept = new Map()
+  /** A write to issue or PR `number`: a kept promotion PR → read next tick; a kept awaiting issue → drop it. */
+  const touch = (/** @type {string} */ slug, /** @type {number} */ number) => {
+    const k = kept.get(slug)
+    if (!k) return
+    const has = (/** @type {any} */ field) => (field?.nodes ?? []).some((/** @type {any} */ n) => n?.number === number)
+    if (has(k.part.promoteRef) || has(k.part.promoteLabelled)) k.dirty = true
+    if (has(k.part.awaiting))
+      k.part.awaiting = {
+        ...k.part.awaiting,
+        nodes: k.part.awaiting.nodes.filter((/** @type {any} */ n) => n?.number !== number),
+      }
+  }
+  /** A write to the promotion (a PR opened, merged, closed, edited, a branch made): read next tick. */
+  const dirty = (/** @type {string} */ slug) => {
+    const k = kept.get(slug)
+    if (k) k.dirty = true
+  }
 
   return {
-    async read(slug) {
+    async read(slug, { fresh = false } = {}) {
       const [owner, name] = slug.split('/')
       const r = config.repos.find((x) => x.slug === slug)?.release
-      // Read whenever there is a promotion (`from` ≠ `to`), on or off: the `q:promote` issues need the comparison
-      // (promotion.mjs); the release graphs check `enabled` themselves.
+      // Whenever there is a promotion (`from` ≠ `to`), on or off: the `q:promote` issues need the comparison
+      // (promotion.mjs); the release graphs check `enabled` themselves. Read every `readEveryMinutes`, else kept.
       const release = r && r.from !== r.to ? { from: r.from, to: r.to } : null
+      const k = release ? kept.get(slug) : undefined
+      const due = Boolean(release && (fresh || !k || k.dirty || now() - k.at >= (r?.readEveryMinutes ?? 0) * 60_000))
       const branches = release ?? { from: '', to: '' }
       const repo = config.repos.find((x) => x.slug === slug)
       const health = repo?.requiredCheck ? { branch: repo.baseBranch, check: repo.requiredCheck } : null
@@ -509,7 +546,8 @@ export function graftGitHub({ config, exec: run = exec }) {
         owner,
         name,
         labels: QUEUE_LABELS,
-        release: Boolean(release),
+        release: due,
+        tips: Boolean(release),
         ...branches,
         health: Boolean(health),
         baseRef: health ? `refs/heads/${health.branch}` : '',
@@ -518,6 +556,18 @@ export function graftGitHub({ config, exec: run = exec }) {
         unqueued: config.intake.adopt ? unqueuedSearch(slug, config.intake.ignoreLabels) : '',
       })
       const data = await json(graft(slug, ['graphql', SNAPSHOT_QUERY, '--vars', vars]))
+      const answered = (data?.data ?? data)?.repository
+      if (release && answered) {
+        const tips = tipsOf(answered)
+        if (due) {
+          const part = Object.fromEntries(RELEASE_FIELDS.map((f) => [f, structuredClone(answered[f] ?? null)]))
+          kept.set(slug, { at: now(), tips, part, dirty: false })
+        } else if (k) {
+          // `from` or `to` moved since the kept read: a merge. Read the release part on the next tick.
+          if (tips !== k.tips) k.dirty = true
+          Object.assign(answered, structuredClone(k.part))
+        }
+      }
       // More than 100 queued issues: follow the cursor, or the newest ones are never scheduled or watched.
       const issues = (data?.data ?? data)?.repository?.issues
       for (let page = 0, info = issues?.pageInfo; info?.hasNextPage && page < MAX_ISSUE_PAGES; page++) {
@@ -529,6 +579,7 @@ export function graftGitHub({ config, exec: run = exec }) {
       }
       const snap = normalize(data, { botLogin: config.graft.botLogin, release, health })
       snap.rateLimit = (data?.data ?? data)?.rateLimit ?? null
+      if (snap.release) snap.release.fresh = due
       const unread = unreadCloses(snap)
       if (!unread.length) return snap
       // Issues named only in PR bodies (in no queue): one more query, for those.
@@ -543,6 +594,7 @@ export function graftGitHub({ config, exec: run = exec }) {
     },
     async label(slug, number, { add, remove }) {
       if (!add.length && !remove.length) return
+      touch(slug, number)
       await graft(slug, [
         'issue',
         'label',
@@ -552,6 +604,7 @@ export function graftGitHub({ config, exec: run = exec }) {
       ])
     },
     async writeState(slug, number, commentId, body) {
+      touch(slug, number)
       if (commentId) {
         const path = `/repos/${slug}/issues/comments/${commentId}`
         await graft(slug, ['api', 'PATCH', path, '--body', JSON.stringify({ body })])
@@ -561,6 +614,7 @@ export function graftGitHub({ config, exec: run = exec }) {
       return made.id
     },
     async close(slug, number, body, { reason } = {}) {
+      touch(slug, number)
       await graft(
         slug,
         ['issue', 'close', String(number), '--body-file', '-', ...(reason ? ['--reason', reason] : [])],
@@ -568,6 +622,7 @@ export function graftGitHub({ config, exec: run = exec }) {
       )
     },
     async comment(slug, number, body) {
+      touch(slug, number)
       await graft(slug, ['issue', 'comment', String(number), '--body-file', '-'], body)
     },
     async createIssue(slug, { title, body, labels }) {
@@ -586,6 +641,7 @@ export function graftGitHub({ config, exec: run = exec }) {
       await graft(slug, ['api', 'DELETE', `/repos/${slug}/git/refs/heads/${branch}`])
     },
     async openPull(slug, { head, base, title, body }) {
+      dirty(slug)
       const path = `/repos/${slug}/pulls`
       const made = await json(graft(slug, ['api', 'POST', path, '--body', JSON.stringify({ head, base, title, body })]))
       return { number: made.number, url: made.html_url }
@@ -627,18 +683,22 @@ export function graftGitHub({ config, exec: run = exec }) {
       return refs.map((/** @type {any} */ r) => String(r.ref).replace(/^refs\/heads\//, ''))
     },
     async createBranch(slug, name, sha) {
+      dirty(slug)
       const body = JSON.stringify({ ref: `refs/heads/${name}`, sha })
       await graft(slug, ['api', 'POST', `/repos/${slug}/git/refs`, '--body', body])
     },
     async editPull(slug, number, { title, body }) {
+      dirty(slug)
       await graft(slug, ['api', 'PATCH', `/repos/${slug}/pulls/${number}`, '--body', JSON.stringify({ title, body })])
     },
     async closePull(slug, number, comment) {
+      dirty(slug)
       await graft(slug, ['issue', 'comment', String(number), '--body-file', '-'], comment)
       await graft(slug, ['api', 'PATCH', `/repos/${slug}/pulls/${number}`, '--body', '{"state":"closed"}'])
     },
     // Through graft's merge policy, as an agent's merge would: auto-merge, or a merge now when the PR is clean.
     async mergePull(slug, number) {
+      touch(slug, number)
       await graft(slug, ['pr', 'merge', String(number), '--auto'])
     },
     async behindBase(slug, number) {

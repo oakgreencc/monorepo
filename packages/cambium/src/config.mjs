@@ -8,11 +8,15 @@ import { homedir, hostname } from 'node:os'
 import { join, resolve } from 'node:path'
 
 /**
- * @typedef {{ enabled: boolean, time: string, from: string, to: string, check: string | null }} RepoRelease
+ * @typedef {{
+ *   enabled: boolean, time: string, from: string, to: string, check: string | null, readEveryMinutes: number,
+ * }} RepoRelease
  *   The promotion PR (`engine: "graph"`): `from` (default: the repo's `baseBranch`) is promoted into `to`
  *   (default `main`) once a day at `time`. `enabled`/`time` default to the top-level `release`. Off when
  *   `from === to`. `check` (default: the repo's `requiredCheck`): the check that must be green on the `from`
- *   commit a release is cut at; `null` cuts at the tip.
+ *   commit a release is cut at; `null` cuts at the tip. `readEveryMinutes` (default: the top-level `release`, 5):
+ *   how often the snapshot reads the promotion part (github.mjs); between reads the last answer is kept, and a
+ *   merge into `from` or `to` forces a read on the next tick. `0` reads every tick.
  * @typedef {'none' | 'green'} MergePolicy
  *   Who merges a Task PR. `none`: not cambium (a merge queue, auto-merge, or a human; past `mergeQueueMinutes`
  *   the issue goes to `q:human`). `green`: cambium, once its checks are green, through `graft pr merge --auto`
@@ -48,7 +52,7 @@ import { join, resolve } from 'node:path'
  *   watchEveryMinutes: number,
  *   merge: MergePolicy,
  *   priorityLabels: string[],
- *   release: { enabled: boolean, time: string },
+ *   release: { enabled: boolean, time: string, readEveryMinutes: number },
  *   reaper: { everyMinutes: number, staleMinutes: number, orphanDays: number },
  *   retriage: { enabled: boolean, time: string, maxSkipDays: number },
  *   intake: { adopt: boolean, ignoreLabels: string[] },
@@ -115,7 +119,7 @@ export function defaults(home = DEFAULT_HOME) {
     watchEveryMinutes: 5,
     merge: 'none',
     priorityLabels: ['priority:critical', 'priority:high', 'priority:medium', 'priority:low'],
-    release: { enabled: false, time: '06:00' },
+    release: { enabled: false, time: '06:00', readEveryMinutes: 5 },
     reaper: { everyMinutes: 60, staleMinutes: 30, orphanDays: 3 },
     retriage: { enabled: false, time: '05:00', maxSkipDays: 14 },
     intake: { adopt: true, ignoreLabels: [] },
@@ -233,12 +237,17 @@ export function resolveConfig(raw = {}) {
     const release = {
       enabled: config.release.enabled,
       time: config.release.time,
+      readEveryMinutes: config.release.readEveryMinutes,
       from: baseBranch,
       to: 'main',
       check: requiredCheck,
       ...r.release,
     }
     if (!/^\d{2}:\d{2}$/.test(release.time)) throw new Error(`config: repo ${r.slug} release.time must be HH:MM`)
+    if (!(typeof release.readEveryMinutes === 'number' && release.readEveryMinutes >= 0))
+      throw new Error(
+        `config: repo ${r.slug} release.readEveryMinutes must be a number, at least 0, got ${JSON.stringify(release.readEveryMinutes)}`,
+      )
     if (release.check !== null && (typeof release.check !== 'string' || !release.check))
       throw new Error(`config: repo ${r.slug} release.check must be a check name or null`)
     const merge = r.merge ?? config.merge
