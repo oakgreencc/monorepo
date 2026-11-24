@@ -1,6 +1,6 @@
 {
   "name": "@oakgreencc/deadwood",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "The prose gate: a markdown allowlist and a comment-density ceiling per source file, over the files git tracks, with a shrink-only baseline.",
   "license": "AGPL-3.0-only",
   "type": "module",

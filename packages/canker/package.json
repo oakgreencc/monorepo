@@ -1,6 +1,6 @@
 {
   "name": "@oakgreencc/canker",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "Per-function CRAP gate: cyclomatic complexity joined with test coverage (Istanbul or lcov), with a ratchet for existing offenders.",
   "license": "AGPL-3.0-only",
   "type": "module",
