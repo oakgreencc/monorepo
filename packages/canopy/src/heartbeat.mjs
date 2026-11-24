@@ -83,6 +83,12 @@ function normalize(/** @type {any} */ hb) {
       ok: Boolean(r?.ok),
       error: r?.error ?? null,
       counts: r?.counts ?? null,
+      // Absent before cambium watched workflows or reported its GraphQL budget: none watched, budget unknown.
+      watch: arr(r?.watch)
+        .map(watchOf)
+        .filter((w) => w !== null),
+      rateLimit: rateLimitOf(r?.rateLimit),
+      pausedUntil: pausedUntil(r?.error),
       // Absent before cambium kept cost accounts: no issues, no days.
       cost: { issues: arr(r?.cost?.issues), days: arr(r?.cost?.days) },
     })),
@@ -96,6 +102,48 @@ function normalize(/** @type {any} */ hb) {
 }
 
 const str = (/** @type {unknown} */ v) => (typeof v === 'string' && v ? v : null)
+const num = (/** @type {unknown} */ v) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+const WATCH_STATES = new Set(['green', 'red', 'unknown'])
+
+/**
+ * One watched workflow as cambium's `watchStates` writes it, or null without a workflow name. A state canopy does
+ * not know reads as unknown; a run without an https URL is kept but not linked.
+ * @param {any} w
+ */
+function watchOf(w) {
+  const workflow = str(w?.workflow)
+  if (!workflow) return null
+  const run = obj(w?.run)
+  return {
+    workflow,
+    branch: str(w.branch),
+    state: WATCH_STATES.has(w.state) ? w.state : 'unknown',
+    run:
+      str(run.url) || str(run.conclusion)
+        ? { url: str(run.url), conclusion: str(run.conclusion), at: str(run.at) }
+        : null,
+    issue: Number.isInteger(w.issue) && w.issue > 0 ? w.issue : null,
+    checkedAt: str(w.checkedAt),
+    error: str(w.error),
+  }
+}
+
+/** The GraphQL budget after the repo's last read, or null when cambium did not report it. @param {any} rl */
+function rateLimitOf(rl) {
+  const remaining = num(rl?.remaining)
+  if (remaining === null) return null
+  return { remaining, cost: num(rl.cost), resetAt: str(rl.resetAt) }
+}
+
+/**
+ * When a repo's reads resume, if cambium paused them to save the GraphQL budget (tick.mjs `read`); null otherwise.
+ * A paused repo is waiting, not failing, and the page says so.
+ * @param {unknown} error
+ */
+export function pausedUntil(error) {
+  const m = typeof error === 'string' ? error.match(/^GraphQL budget spent; reads paused until (\S+)/) : null
+  return m && Number.isFinite(Date.parse(m[1])) ? m[1] : null
+}
 
 /**
  * One graph as cambium's `describeGraph` writes it, or null when it has no name or nodes. Edges to a node the
