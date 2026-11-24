@@ -7,13 +7,13 @@
  * (Claude Code terminal, GitHub comments, Discord, web chat). Nodes call only what the driver injects:
  *
  *   ctx.agent(node, state)   a schema-checked agent turn; returns the next state
- *   ctx.channel.post(msg)    posts to the channel
- *   ctx.channel.poll(state)  the next reply from an allowed answerer, or null
+ *   ctx.channel.post(msg, s) posts to the channel (`s`: the state after the step, for the channel's idempotence)
+ *   ctx.channel.poll(state)  the next reply from an allowed answerer after `state.cursor`, or null
  *   ctx.commit(state)        deterministic: files follow-ups as `q:intake`, posts the `cambium:answer` comment
  *   ctx.now()                ms clock (default `Date.now`)
  *   ctx.holder, ctx.idleMs   who takes the lease at `open`, and its idle timeout (default {@link IDLE_MS})
  *
- * No driver lives here (the CLI/plugin and hosted drivers are their own issues).
+ * No driver lives here: the hosted one (the tick, over a channel) is decide-driver.mjs; the CLI/plugin one is its own.
  *
  * The checkpoint after every stop is the `cambium:decide` marker: one comment on the issue, edited in place, holding
  * the whole state, the node and a status (`leased` | `paused` | `done`). {@link driveDecide} writes it before any
@@ -45,7 +45,15 @@ export const Question = z.object({
 })
 const Round = z.object({ n: z.number(), questions: z.array(Question).min(1).max(5) })
 export const Answer = z.object({ id: z.string(), text: z.string() })
-const Reply = z.object({ author: z.string(), at: z.string(), channel: z.string(), body: z.string() })
+const Reply = z.object({
+  author: z.string(),
+  at: z.string(),
+  channel: z.string(),
+  body: z.string(),
+  id: z.string().optional(),
+})
+/** Where a channel's replies were last consumed up to: the reply's author, time and channel id (if it has one). */
+const Cursor = z.object({ author: z.string(), at: z.string(), id: z.string().nullable() })
 export const Decision = z.object({
   choice: z.string(),
   inScope: z.array(z.string()),
@@ -76,15 +84,20 @@ export const State = z.object({
   confirm: z.enum(['pending', 'yes', 'edit', 'abandon']).default('pending'),
   notes: z.string().default(''),
   reply: Reply.nullable().default(null),
+  cursor: Cursor.nullable().default(null),
+  ignored: z.array(Cursor).default([]),
   answerUrl: z.string().nullable().default(null),
 })
 
 /** @typedef {z.infer<typeof State>} DecideState */
 /**
- * @typedef {{ author: string, at: string, channel: string, body: string }} DecideReply
+ * @typedef {{ author: string, at: string, channel: string, body: string, id?: string }} DecideReply
  * @typedef {{
  *   agent: (node: string, state: DecideState) => Promise<unknown>,
- *   channel: { post: (msg: unknown) => Promise<unknown>, poll: (state: DecideState) => Promise<DecideReply | null> },
+ *   channel: {
+ *     post: (msg: unknown, state: DecideState) => Promise<unknown>,
+ *     poll: (state: DecideState) => Promise<DecideReply | null>,
+ *   },
  *   commit: (state: DecideState) => Promise<unknown>,
  *   now?: () => number, holder?: string, idleMs?: number,
  * }} DecideCtx
@@ -95,6 +108,12 @@ const nowIso = (ctx) => new Date((ctx.now ?? Date.now)()).toISOString()
 
 /** The lease with `activeAt` moved to now. @param {DecideState} s @param {DecideCtx} ctx */
 const touched = (s, ctx) => (s.lease ? { ...s, lease: { ...s.lease, activeAt: nowIso(ctx) } } : s)
+
+/**
+ * A reply taken from the channel: the state carries it, and the cursor moves past it, so the channel's next poll
+ * starts after it. @param {DecideState} s @param {DecideReply} reply @returns {DecideState}
+ */
+const consumed = (s, reply) => ({ ...s, reply, cursor: { author: reply.author, at: reply.at, id: reply.id ?? null } })
 
 /** No channel activity for the lease's idle timeout. @param {DecideState} s @param {DecideCtx} ctx */
 const idleFor = (s, ctx) => !!s.lease && (ctx.now ?? Date.now)() - Date.parse(s.lease.activeAt) >= s.lease.idleMs
@@ -129,7 +148,8 @@ const turn = (name, onReply) =>
     output: State,
     poll: async (/** @type {DecideState} */ s, /** @type {DecideCtx} */ ctx) => {
       const reply = s.reply ?? (await ctx.channel.poll(s))
-      if (reply) return { ready: true, output: touched(State.parse(await onReply(s, reply, ctx)), ctx) }
+      if (reply)
+        return { ready: true, output: touched(State.parse(await onReply(consumed(s, reply), reply, ctx)), ctx) }
       if (idleFor(s, ctx)) return { ready: true, output: { ...s, paused: name } }
       return { ready: false }
     },
@@ -146,7 +166,7 @@ const orient = step('orient', async (s, ctx) => ctx.agent('orient', s))
 const mock = step('mock', async (s, ctx) => ctx.agent('mock', s))
 const askRound = step('ask-round', async (s, ctx) => {
   const next = State.parse(await ctx.agent('ask-round', s))
-  await ctx.channel.post({ round: next.rounds.at(-1) })
+  await ctx.channel.post({ round: next.rounds.at(-1) }, next)
   return next
 })
 const awaitAnswers = turn('await-answers', async (s, reply) => ({ ...s, reply }))
@@ -156,7 +176,7 @@ const applyAnswers = step('apply-answers', async (s, ctx) => ({
 }))
 const draft = step('draft', async (s, ctx) => {
   const next = State.parse(await ctx.agent('draft', s))
-  await ctx.channel.post({ draft: next.draft })
+  await ctx.channel.post({ draft: next.draft }, next)
   return { ...next, confirm: 'pending' }
 })
 const confirm = turn('confirm', async (s, reply, ctx) => ({
@@ -171,7 +191,7 @@ const paused = defineWait({
   output: State,
   poll: async (/** @type {DecideState} */ s, /** @type {DecideCtx} */ ctx) => {
     const reply = await ctx.channel.poll(s)
-    return reply ? { ready: true, output: touched({ ...s, reply }, ctx) } : { ready: false }
+    return reply ? { ready: true, output: touched(consumed(s, reply), ctx) } : { ready: false }
   },
 })
 

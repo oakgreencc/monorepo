@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * One tick: Read → Reconcile → Watch → Sweep → Schedule → Release → GC →
+ * One tick: Read → Reconcile → Watch → Sweep → Schedule → Decide → Release → GC →
  * Heartbeat. Every collaborator is injected ({@link Deps}); the daemon is a
  * loop around this function. Each step is bounded by `stepTimeoutSeconds`; a
  * step that throws or times out is recorded and the tick moves on. Nothing
@@ -21,6 +21,7 @@ import { branchName } from './convention.mjs'
 import { PREPARE_FAILED_LINE } from './prepare.mjs'
 import { releaseDue, releaseNotBuilt } from './phases/release.mjs'
 import { decide } from './graphs/decide.mjs'
+import { driveDecisions } from './decide-driver.mjs'
 import { releaseGraphs } from './graphs/release.mjs'
 import { DISPATCH_NOT_BUILT, dispatchNotBuilt } from './phases/dispatch.mjs'
 import { isRepair } from './base-health.mjs'
@@ -116,6 +117,7 @@ export async function tick(deps) {
           ['adopt', adopt],
         ])),
     ...(ctx.mode === 'running' ? /** @type {[string, StepFn][]} */ ([['schedule', schedule]]) : []),
+    ...(paused ? [] : /** @type {[string, StepFn][]} */ ([['decide', driveDecisions]])),
     ...(paused ? [] : /** @type {[string, any][]} */ ([['release', release]])),
     ...(paused ? [] : /** @type {[string, StepFn][]} */ ([['workflows', watchWorkflows]])),
     ...(paused ? [] : /** @type {[string, StepFn][]} */ ([['stalls', watchStalls]])),

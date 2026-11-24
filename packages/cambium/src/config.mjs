@@ -28,13 +28,20 @@ import { join, resolve } from 'node:path'
  *   (so graft's merge policy still decides). `green` needs `engine: "graph"`.
  * @typedef {{
  *   slug: string, path: string, baseBranch: string, release: RepoRelease, merge: MergePolicy,
- *   requiredCheck: string | null, phases: RepoPhases, watch: Watch[],
+ *   requiredCheck: string | null, phases: RepoPhases, watch: Watch[], decide?: DecideConfig,
  * }} Repo
  *   `requiredCheck` (default `ci`): the check whose runs on `baseBranch` say whether the base is green (see
  *   base-health.mjs); `null` turns the red-base gate and repair off for the repo. `phases`: per-phase overrides of
  *   `wallClockMinutes` and `maxTurns` for this repo's workers ({@link capsFor}). `watch`: workflows whose latest
- *   run on a branch must be green (watch.mjs).
- * @typedef {Partial<Record<'task' | 'dispatch' | 'rescue', { wallClockMinutes?: number, maxTurns?: number }>>} RepoPhases
+ *   run on a branch must be green (watch.mjs). `decide`: the hosted decide driver for this repo, over the top-level
+ *   `decide` (absent: the top-level one).
+ * @typedef {{ channel: 'github' | null, answerers: Record<string, string[]>, idleHours: number }} DecideConfig
+ *   The hosted decide driver (decide-driver.mjs, `engine: "graph"`). `channel` (default null: off): where cambium's
+ *   tick walks a person through a `q:human` + `ask:decide` + `ask:session` issue; `github` posts the rounds and the
+ *   draft as issue comments and reads replies from them. `answerers`: per channel, the logins whose replies count;
+ *   anyone else's is ignored and noted in the decision's marker. The channel in use needs at least one.
+ *   `idleHours` (default 24): no reply for this long pauses the decision until the next one.
+ * @typedef {Partial<Record<'task' | 'dispatch' | 'rescue' | 'decide', { wallClockMinutes?: number, maxTurns?: number }>>} RepoPhases
  * @typedef {{ workflow: string, branch: string, issue: boolean }} Watch
  *   `workflow`: the workflow file name (`release.yml`) or its id. `branch` (default: the repo's `baseBranch`).
  *   `issue` (default true): a failing run opens one `q:human` issue, closed once the workflow is green again.
@@ -51,8 +58,9 @@ import { join, resolve } from 'node:path'
  *   repos: Repo[],
  *   phases: {
  *     task: TaskCaps, dispatch: PhaseCaps & { maxRounds: number, deferHours: number, maxDefers: number },
- *     rescue: PhaseCaps,
+ *     rescue: PhaseCaps, decide: PhaseCaps,
  *   },
+ *   decide: DecideConfig,
  *   mergeQueueMinutes: number,
  *   mergeStallMinutes: number,
  *   watchEveryMinutes: number,
@@ -126,7 +134,9 @@ export function defaults(home = DEFAULT_HOME) {
         maxDefers: 8,
       },
       rescue: { cap: 0, wallClockMinutes: 20, maxTurns: 80, maxAttempts: 1 },
+      decide: { cap: 1, wallClockMinutes: 20, maxTurns: 80, maxAttempts: 3 },
     },
+    decide: { channel: null, answerers: {}, idleHours: 24 },
     mergeQueueMinutes: 120,
     mergeStallMinutes: 20,
     watchEveryMinutes: 5,
@@ -182,8 +192,8 @@ function repoPhases(slug, raw) {
   /** @type {RepoPhases} */
   const out = {}
   for (const [phase, caps] of Object.entries(raw)) {
-    if (!['task', 'dispatch', 'rescue'].includes(phase))
-      throw new Error(`config: repo ${slug} phases.${phase}: the phases are task, dispatch and rescue`)
+    if (!['task', 'dispatch', 'rescue', 'decide'].includes(phase))
+      throw new Error(`config: repo ${slug} phases.${phase}: the phases are task, dispatch, rescue and decide`)
     for (const [k, v] of Object.entries(caps ?? {})) {
       if (!REPO_PHASE_KEYS.includes(k))
         throw new Error(`config: repo ${slug} phases.${phase}.${k}: a repo may set ${REPO_PHASE_KEYS.join(', ')}`)
@@ -272,7 +282,19 @@ export function resolveConfig(raw = {}) {
       throw new Error(`config: repo ${r.slug} merge must be "none" or "green", got ${JSON.stringify(merge)}`)
     const phases = repoPhases(r.slug, r.phases)
     const watch = repoWatch(r.slug, r.watch, baseBranch)
-    return { slug: r.slug, path: untilde(r.path), baseBranch, release, merge, requiredCheck, phases, watch }
+    const decide =
+      r.decide === undefined ? undefined : decideConfig(`repo ${r.slug} decide`, merge2(config.decide, r.decide))
+    return {
+      slug: r.slug,
+      path: untilde(r.path),
+      baseBranch,
+      release,
+      merge,
+      requiredCheck,
+      phases,
+      watch,
+      ...(decide ? { decide } : {}),
+    }
   })
   for (const k of /** @type {const} */ (['mergeStallMinutes', 'watchEveryMinutes']))
     if (!(typeof config[k] === 'number' && config[k] >= 0))
@@ -306,10 +328,41 @@ export function resolveConfig(raw = {}) {
     throw new Error(`config: costFlagUsd must be a number, at least 0, got ${JSON.stringify(config.costFlagUsd)}`)
   if (config.engine !== 'legacy' && config.engine !== 'graph')
     throw new Error(`config: engine must be "legacy" or "graph", got ${JSON.stringify(config.engine)}`)
+  config.decide = decideConfig('decide', config.decide)
+  const hosting = config.repos.filter((r) => (r.decide ?? config.decide).channel)
+  if (hosting.length && config.engine !== 'graph')
+    throw new Error(`config: decide.channel (${hosting.map((r) => r.slug).join(', ')}) needs engine "graph"`)
   const merging = config.repos.filter((r) => r.merge === 'green')
   if (merging.length && config.engine !== 'graph')
     throw new Error(`config: merge "green" (${merging.map((r) => r.slug).join(', ')}) needs engine "graph"`)
   return config
+}
+
+/** A repo's `decide` over the top-level one: `answerers` merge per channel. @param {any} base @param {any} over */
+const merge2 = (base, over) => ({
+  ...base,
+  ...over,
+  answerers: { ...(base?.answerers ?? {}), ...(over?.answerers ?? {}) },
+})
+
+/**
+ * A checked `decide` block. @param {string} where @param {any} raw @returns {DecideConfig}
+ */
+function decideConfig(where, raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`config: ${where} must be an object`)
+  const { channel = null, answerers = {}, idleHours = 24 } = raw
+  if (channel !== null && channel !== 'github')
+    throw new Error(`config: ${where}.channel must be "github" or null, got ${JSON.stringify(channel)}`)
+  if (!answerers || typeof answerers !== 'object' || Array.isArray(answerers))
+    throw new Error(`config: ${where}.answerers must be an object of channel → logins`)
+  for (const [ch, logins] of Object.entries(answerers))
+    if (!Array.isArray(logins) || logins.some((l) => typeof l !== 'string' || !l))
+      throw new Error(`config: ${where}.answerers.${ch} must be a list of logins`)
+  if (channel && !answerers[channel]?.length)
+    throw new Error(`config: ${where}.answerers.${channel} needs at least one login: nobody else may answer`)
+  if (!(typeof idleHours === 'number' && idleHours > 0))
+    throw new Error(`config: ${where}.idleHours must be a number above 0, got ${JSON.stringify(idleHours)}`)
+  return { channel, answerers, idleHours }
 }
 
 /**

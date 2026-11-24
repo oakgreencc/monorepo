@@ -49,9 +49,10 @@ Each step is bounded by `stepTimeoutSeconds`. A step that throws or times out is
 4. **Sweep.** An issue labelled `running` with this host (or no host) in its marker and no tracked worker → requeue. This is what makes losing the SQLite file cost one requeue.
 5. **Adopt** (`src/adopt.mjs`; both engines, not while paused). An open issue in no queue with no state comment, named by no agent PR (its `closes`, or its branch), and not labelled `watch`, `red-base`, `rescue`, `stall` or one of `intake.ignoreLabels` gains `q:intake`: an issue filed without the label is triaged instead of ignored. It joins the snapshot, so Schedule can triage it in the same tick. `intake.adopt: false` turns this off.
 6. **Schedule.** Start Task workers for `q:task` issues without `running`, by priority label then age, up to `phases.task.cap` counted from live workers. A task requeued earlier in the same tick can start in that tick. Then, with `engine: "graph"` and `phases.dispatch.cap > 0`, first wake `q:human` and parked intake issues that have a human reply, then start triage workers for `q:intake` issues the same way ([the dispatch graph](#the-dispatch-graph)).
-7. **Release.** Legacy: once a day at `release.time` when `release.enabled`; the run itself is a seam. Graph: the [release graphs](#the-release-graphs), per repo.
-8. **Upkeep** (graph engine). The hourly [reaper](#upkeep) of untracked agent PRs, then the [stall fallback](#upkeep) for a queue that stopped moving.
-9. **Heartbeat.** Write the state file.
+7. **Decide** (graph engine, a repo with `decide.channel`). One turn of every [hosted decision](#hosted-decisions).
+8. **Release.** Legacy: once a day at `release.time` when `release.enabled`; the run itself is a seam. Graph: the [release graphs](#the-release-graphs), per repo.
+9. **Upkeep** (graph engine). The hourly [reaper](#upkeep) of untracked agent PRs, then the [stall fallback](#upkeep) for a queue that stopped moving.
+10. **Heartbeat.** Write the state file.
 
 A requeue is `q:task` with attempt + 1, or, once `maxAttempts` are spent, `q:human` + `why:budget`. Who merges a Task PR is the repo's `merge` setting ([The PR graph](#the-pr-graph)): by default not cambium (a merge queue, auto-merge or a human); with `"merge": "green"` cambium merges it once CI is green. The other merge cambium asks for is an approved promotion PR, through `graft pr merge`; see [The release graphs](#the-release-graphs).
 
@@ -129,8 +130,10 @@ One JSON file. Everything but `repos` is optional; these are the defaults:
       "deferHours": 6,
       "maxDefers": 8
     },
-    "rescue": { "cap": 0, "wallClockMinutes": 20, "maxTurns": 80, "maxAttempts": 1 }
+    "rescue": { "cap": 0, "wallClockMinutes": 20, "maxTurns": 80, "maxAttempts": 1 },
+    "decide": { "cap": 1, "wallClockMinutes": 20, "maxTurns": 80, "maxAttempts": 3 }
   },
+  "decide": { "channel": null, "answerers": {}, "idleHours": 24 },
   "mergeQueueMinutes": 120,
   "mergeStallMinutes": 20,
   "watchEveryMinutes": 5,
@@ -176,6 +179,7 @@ One JSON file. Everything but `repos` is optional; these are the defaults:
 - `engine` picks how the Task phase runs: `"legacy"` (the stage tick, the default) or `"graph"` (the [`task` graph](#the-task-graph)). Both make the same moves; see [The task graph](#the-task-graph). Only `"graph"` runs the [`dispatch` graph](#the-dispatch-graph) (gated by `phases.dispatch.cap`); legacy leaves `q:intake` alone.
 - `stall` (`engine: "graph"`): the [stall fallback](#upkeep). `retriage` (the daily re-triage of every `q:human` issue) is removed; the stall fallback replaces it, and an old file's `retriage` key is ignored.
 - `phases.rescue.cap` (`engine: "graph"`; 0, the default, turns it off) and `rescue`: see [The rescue graph](#the-rescue-graph).
+- `decide` (top level, or per repo in `repos[]`; `engine: "graph"`): the [hosted decide driver](#hosted-decisions). `channel` (`null`, the default, is off; `"github"`): where the tick walks a person through a decision. `answerers`: per channel, the logins whose replies count (`{ "github": ["james"] }`); the channel in use needs at least one. A repo's `answerers` merge over the top level's per channel. `idleHours` (default 24): no reply this long pauses the decision. `phases.decide` caps its workers.
 - Setting `paths.home` moves every default path under it.
 - `release.time` is host-local `HH:MM`.
 - `repos[].phases`: per-repo overrides of `wallClockMinutes` and `maxTurns`, by phase (`{ "task": { "wallClockMinutes": 120 } }`); other keys are refused. `capsFor` in `src/config.mjs` merges them over the global `phases`.
@@ -682,7 +686,7 @@ A label change counts after `rescue.graceMinutes` (default 30) since the issue's
 
 ## The decide graph
 
-Some `q:human` issues can only be answered by a person, and a live session with the code helps: triage's `ask: decide` with `interactive: true` (labels `ask:decide` + `ask:session`). The `decide` graph (`src/graphs/decide.mjs`) walks a person to a decision and writes it back. It **only decides**: it never builds. Waits are the person's turns, on whatever channel hosts the session (Claude Code terminal, GitHub comments, Discord, web chat). The tick does not run it: a session driver does ([the terminal driver](#the-terminal-driver), `cambium decide`), so it is not a `cambium run` graph, but the heartbeat describes it with the others.
+Some `q:human` issues can only be answered by a person, and a live session with the code helps: triage's `ask: decide` with `interactive: true` (labels `ask:decide` + `ask:session`). The `decide` graph (`src/graphs/decide.mjs`) walks a person to a decision and writes it back. It **only decides**: it never builds. Waits are the person's turns, on whatever channel hosts the session (Claude Code terminal, GitHub comments, Discord, web chat). Two drivers run it over the same graph and marker: a session ([the terminal driver](#the-terminal-driver), `cambium decide`, run by `/oakgreen:decide`) and the tick itself, [hosted](#hosted-decisions) on a channel. It is not a `cambium run` graph; the heartbeat describes it with the others.
 
 ```mermaid
 flowchart TD
@@ -737,7 +741,7 @@ flowchart TD
 | `abandon`       | step | Ends without an answer; the issue stays in `q:human`.                                                                            |
 | `paused`        | wait | An idle decision: holds until the next reply, then resumes the wait it left.                                                     |
 
-Nodes call only what the driver injects: `ctx.agent(node, state)` (a schema-checked agent turn), `ctx.channel.post` / `ctx.channel.poll`, `ctx.commit`, and `ctx.now`. Every node's input and output is the whole `State` (zod).
+Nodes call only what the driver injects: `ctx.agent(node, state)` (a schema-checked agent turn), `ctx.channel.post(msg, state)` / `ctx.channel.poll(state)`, `ctx.commit`, and `ctx.now`. A wait that takes a reply moves `state.cursor` past it (`author`, `at`, the channel's `id`), so the next poll starts after it. Every node's input and output is the whole `State` (zod).
 
 **Marker and resume.** The checkpoint after every stop is a `cambium:decide` marker: one comment on the issue, edited in place, with a readable line and the hidden JSON `{ v: 1, graph: "decide", graphVersion, node, status, outcome, at, error, input }`. `input` is the whole state, so a fresh driver on any channel resumes from the marker alone (`parseDecideMarker`, `positionOf`), without asking anything already answered. `driveDecide` runs one turn and writes the marker before any label change. `status` is `leased`, `paused` or `done` (`outcome` `answered` or `abandoned`). A node error is recorded in `error` at the failed node; the next turn retries it.
 
@@ -756,6 +760,18 @@ Nodes call only what the driver injects: `ctx.agent(node, state)` (a schema-chec
 - **The advance.** An accepted output runs its node, then the edges through the nodes cambium runs itself (`commit`, `abandon`), and stops before the next node that needs the session. Then it writes the marker (one comment, edited in place). The next advance reads only the marker.
 - **`commit`.** Files each follow-up as a `q:intake` issue, then posts the decision (choice, scope, acceptance checks, follow-ups) with a `cambium:answer` marker naming the person (`--as`, else `$GITHUB_USER`, else `$USER`) as `answerer`. Once the marker is `done`, that comment wakes the issue for triage like any human reply.
 - **Folder.** `<paths.home>/decide/<owner>__<name>/issue-<n>/` holds a copy of the last checkpoint (`checkpoint.md`) and, for a visual ask, the `mock` node's HTML (`mocks/<option>.html`). The round links each mock by `file://` URL.
+
+### Hosted decisions
+
+With `engine: "graph"` and a repo's `decide.channel` set, each tick runs one turn of every open `q:human` issue labelled `ask:decide` and `ask:session` (not `why:budget`) whose `cambium:decide` marker is absent or live on that channel (`src/decide-driver.mjs`). A marker that is `done`, or live on another channel (a terminal session holds it), is left alone. A new decision is seeded from the ask in the state comment (question, options, lens) with holder `cambium@<channel>`.
+
+- **A turn** resumes from the marker alone and advances until a wait holds, the graph ends, or an agent step is still running. It writes the marker only when it changed (an idle wait costs no write).
+- **Agent steps** are one-shot read-only `claude -p` workers (phase `decide`, branch `cambium/decide-<n>-<node>`, under `phases.decide`). The prompt is the node, what it asks for, and the whole state from the marker; the final message ends with the next state as JSON (`lease`, `reply`, `cursor`, `ignored` and `channel` are kept from the input). A turn that reaches one starts its worker and stops; a later tick reads the result once it exited. A bad result is recorded as the marker's `error` and retried, up to `phases.decide.maxAttempts` per node. A worker for a node the decision has left is killed and dropped.
+- **Channel `github`.** `post` comments a round (numbered questions, each with its recommendation) or the draft, with a hidden `<!-- cambium:decide-post {"kind","after"} -->` tag naming the reply it follows; a post of that kind after that reply already on the issue is not made again, so a step rerun after a lost marker write does not post twice. `poll` reads the issue's newest 20 comments (the tick's snapshot) after `state.cursor` (or the lease's start): the first by a login on `decide.answerers.github` (case-insensitive) is the reply. A comment by anyone else is skipped and noted once in the marker (`input.ignored`: author, time, comment id) with an `info` event; cambium's markers, posts and answers, and `graft.botLogin`'s comments, are skipped silently.
+- **Commit** files each follow-up as `q:intake` (not one already open under the same title), then posts the answer comment (`cambium:answer`, `answerer` the last reply's author). With the marker `done`, that comment wakes the issue back into triage.
+- **Restart.** Nothing but the marker and the issue's comments carries a decision: a fresh process resumes it, and a step whose worker was lost runs again.
+
+Discord, through mycelium, is the next channel (#173); web chat is undecided.
 
 ## Graph module (preview)
 
