@@ -30,6 +30,7 @@ GitHub holds cambium's state. Only cambium moves these labels; workers have `gra
 | `wait:blocked`                                | Parked until its GitHub "blocked by" issues close.                                              |
 | `red-base`                                    | A repair issue cambium opened for a red base branch.                                            |
 | `rescue`                                      | A root-cause ticket filed by the rescue graph.                                                  |
+| `stall`                                       | With `q:human`: a report of issues that block each other, or wait on a `q:human` issue.         |
 | `priority:critical` … `priority:low`          | Scheduling order (configurable via `priorityLabels`).                                           |
 | _no `q:` label_, open `agent/*` PR            | Submitted: the PR is in review or the merge queue.                                              |
 

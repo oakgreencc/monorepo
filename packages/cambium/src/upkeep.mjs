@@ -8,22 +8,20 @@
  *   handed to the PR graph exactly as a worker's submit would (`submit`: marker `pr`, out of every queue), so Watch
  *   merges it when green or reworks it when red, instead of a fresh Task redoing the work. A PR whose issue is closed
  *   is closed; one with no issue at all is closed after `reaper.orphanDays` (default 3). The branch stays.
- * - **Re-triage** (daily at `retriage.time` when `retriage.enabled`): every `q:human` issue goes back to `q:intake`,
- *   so triage looks again under its current rubric: done since (obsolete), now checkable (defer), or now a task.
- *   Not `why:approve` (a merge only a human may make: a re-triage would start a duplicate Task) and not one holding
- *   `running`. Not one whose triage inputs (triage-inputs.mjs) are unchanged since triage answered needs-human,
- *   unless that was `retriage.maxSkipDays` (default 14) or more ago: it stays, no worker, no label moves.
+ * - **Stall** (stall.mjs, every `stall.everyMinutes`): the fallback for a queue that stops moving. Unparks an orphan
+ *   blocker or an overdue defer back to triage, reports a blocked-by cycle (or a chain ending in `q:human`) once as a
+ *   `q:human` issue, warns once when the repo starves, and re-triages only the `q:human` issues involved whose triage
+ *   inputs changed. It replaces the daily re-triage of every `q:human` issue.
  * - **Rescue** (rescue-engine.mjs, while `phases.rescue.cap > 0`): rescue workers every tick, and every
  *   `rescue.everyMinutes` a sweep for stuck items, each diagnosed and unstuck by the rescue graph.
  */
 import { drive } from './graph-engine.mjs'
 import { branchIssue } from './github.mjs'
-import { iso, key, MIN, setLabels } from './issue-state.mjs'
-import { move, Q, RUNNING, WHY } from './labels.mjs'
-import { releaseDue } from './phases/release.mjs'
+import { MIN } from './issue-state.mjs'
+import { RUNNING } from './labels.mjs'
 import { rescueStep } from './rescue-engine.mjs'
+import { stall } from './stall.mjs'
 import { each } from './tick.mjs'
-import { retriageDecision } from './triage-inputs.mjs'
 
 /**
  * @typedef {import('./tick.mjs').Deps} Deps
@@ -72,7 +70,7 @@ export function reapVerdict(pr, snap, { now, staleMinutes, orphanDays, busy }) {
  */
 export async function upkeep(deps, ctx) {
   await reap(deps, ctx)
-  await retriage(deps, ctx)
+  await stall(deps, ctx)
   await rescueStep(deps, ctx)
 }
 
@@ -116,43 +114,5 @@ export async function reap(deps, ctx) {
       },
       (pr) => ({ repo: slug, issue: pr.number }),
     )
-  }
-}
-
-/** @param {Deps} deps @param {Ctx} ctx */
-export async function retriage(deps, ctx) {
-  const { enabled, time, maxSkipDays } = deps.config.retriage
-  if (!enabled) return
-  const last = deps.store.get('retriage.lastRun')
-  if (!releaseDue(ctx.now, last === null ? null : Number(last), time)) return
-  deps.store.set('retriage.lastRun', String(ctx.now))
-  for (const [slug, snap] of ctx.snaps) {
-    const human = [...snap.issues.values()].filter(
-      (i) =>
-        i.state === 'OPEN' &&
-        i.labels.includes(Q.human) &&
-        !i.labels.includes(WHY.approve) &&
-        !i.labels.includes(RUNNING) &&
-        !ctx.touched.has(key(slug, i.number)),
-    )
-    const o = { now: ctx.now, maxSkipDays, botLogin: deps.config.graft.botLogin }
-    const changed = human.filter((i) => retriageDecision(i, snap, o).retriage)
-    let moved = 0
-    await each(
-      deps,
-      changed,
-      async (issue) => {
-        await setLabels(deps, slug, issue, move(issue.labels, Q.intake))
-        moved++
-      },
-      (issue) => ({ repo: slug, issue: issue.number }),
-    )
-    if (human.length)
-      deps.log(
-        'info',
-        `re-triage: ${changed.length} of ${human.length} changed; ${moved} back to q:intake, ` +
-          `${human.length - changed.length} unchanged skipped (${iso(ctx.now)})`,
-        { repo: slug },
-      )
   }
 }

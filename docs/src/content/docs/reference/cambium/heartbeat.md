@@ -9,7 +9,7 @@ Written at the end of every tick to `paths.heartbeat` (default `~/.cambium/state
 
 - `version` changes only on an incompatible change. Current: `1`.
 - Times are ISO 8601 UTC strings. Durations are milliseconds.
-- `engine`, `graphs`, `costFlagUsd`, `repos[].cost`, `repos[].watch` and `repos[].rateLimit` were added within version 1; older heartbeats lack them.
+- `engine`, `graphs`, `costFlagUsd`, `repos[].cost`, `repos[].watch`, `repos[].rateLimit` and `repos[].stall` were added within version 1; older heartbeats lack them.
 
 ## Top level
 
@@ -24,7 +24,7 @@ Written at the end of every tick to `paths.heartbeat` (default `~/.cambium/state
 | `steps`   | array  | `{ name, ok, ms, error }` in order: read, reconcile, watch, sweep, schedule, release. Paused: read only. Draining: no schedule. |
 | `counts`  | object | Summed over repos read this tick (below).                               |
 | `caps`    | object | `{ task, dispatch }`.                                                   |
-| `repos`   | array  | Per repo: `{ slug, ok, error, counts, base, watch, rateLimit, cost }`; `counts` is `null` when the read failed or was paused; `rateLimit` is `{ cost, remaining, resetAt }`, the GraphQL budget after the read (reads pause until `resetAt` once fewer than five reads' worth is left); `base` is red-base state; `watch` is one `{ workflow, branch, state, run, issue, checkedAt, error }` per [watched workflow](/reference/cambium/configuration/#reposwatch), `state` being `green`, `red` or `unknown`; `cost` is below. |
+| `repos`   | array  | Per repo: `{ slug, ok, error, counts, base, watch, rateLimit, cost, stall }`; `counts` is `null` when the read failed or was paused; `rateLimit` is `{ cost, remaining, resetAt }`, the GraphQL budget after the read (reads pause until `resetAt` once fewer than five reads' worth is left); `base` is red-base state; `watch` is one `{ workflow, branch, state, run, issue, checkedAt, error }` per [watched workflow](/reference/cambium/configuration/#reposwatch), `state` being `green`, `red` or `unknown`; `cost` is below; `stall` is the [stall fallback](/reference/cambium/graphs/#stall)'s last check, `{ checkedAt, starved, loops }`: `starved` is `null` or `{ since, parked, lastMergeAt }`, and `loops` lists each reported cycle or chain as `{ key, kind, members, end, issue }` (`kind` `cycle` or `human`). |
 | `workers` | array  | Tracked workers (below).                                                |
 | `events`  | array  | Last 100 log lines, oldest first: `{ at, level, msg, repo?, issue? }`; `level` is `info` \| `warn` \| `error`. |
 | `engine`  | string | `legacy` \| `graph`.                                                    |

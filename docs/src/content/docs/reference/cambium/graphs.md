@@ -18,7 +18,7 @@ All graphs run with `"engine": "graph"`. Steps act once; waits hold until polled
 | Adopt      | An open issue in no queue that cambium has never handled, and no agent PR names, gains `q:intake`. |
 | Schedule   | Starts Task workers by priority then age up to `phases.task.cap`; wakes replied-to issues; starts triage up to `phases.dispatch.cap`. |
 | Release    | [Release graphs](#release-prepare) per repo.                                                          |
-| Upkeep     | Reaper, re-triage, then the [rescue](#rescue) sweep.                                                  |
+| Upkeep     | Reaper, [stall](#stall) fallback, then the [rescue](#rescue) sweep.                                   |
 | Heartbeat  | Writes the [state file](/reference/cambium/heartbeat/).                                               |
 
 ## task
@@ -257,9 +257,19 @@ Every `reaper.everyMinutes`, for each open untracked `agent/*` PR idle `reaper.s
 | No issue                                                  | Close after `reaper.orphanDays` untouched. The branch stays.                    |
 | Live worker on the issue, or the issue tracks this PR     | Leave it.                                                                       |
 
-### Re-triage
+### Stall
 
-Daily at `retriage.time` when `retriage.enabled`. Every `q:human` issue returns to `q:intake` without its `why:*`, except `why:approve`, issues holding `running`, and issues whose triage inputs are unchanged.
+Every `stall.everyMinutes`, per repo, in order. No agent decides.
+
+| Condition            | Detected when                                                                                                   | Action                                                                                         |
+| -------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Orphan blocker       | `wait:blocked`, every "blocked by" issue closed, still parked `stall.graceMinutes` after the last one closed.    | Unpark: marker to `start-triage` (history `unpark`), `wait:*` removed.                          |
+| Overdue defer        | `wait:deferred`, still parked `stall.overdueMinutes` past `deferUntil`.                                         | Unpark.                                                                                        |
+| Cycle                | Open issues whose open "blocked by" links form a cycle.                                                         | One `q:human` + `stall` issue naming it, and a `warn`. Closed once the cycle is gone.          |
+| Chain into `q:human` | `wait:blocked`, parked `stall.graceMinutes`, its open blockers leading to a `q:human` issue.                     | One `q:human` + `stall` issue per `q:human` issue at the end. Closed once nothing waits on it. |
+| Starved              | No `q:task`, nothing `running`, `q:intake` only `wait:*` issues, no merge for `stall.starvedHours`.             | One `warn` when it starts, one `info` when it ends. The heartbeat's `repos[].stall` shows it.  |
+
+Then the `q:human` issues involved (a cycle's members, a chain's end, what starved issues wait on) go back to `q:intake` without their `why:*`, if their triage inputs changed. Never `why:approve`, an issue holding `running`, or the rest of `q:human`.
 
 When triage answers needs-human, the marker keeps a fingerprint of what triage saw:
 
@@ -270,16 +280,13 @@ When triage answers needs-human, the marker keeps a fingerprint of what triage s
 - agent PRs naming the issue and their states
 - the triage rubric version
 
-| Fingerprint                                  | Re-triage |
-| -------------------------------------------- | --------- |
-| Matches, taken less than `retriage.maxSkipDays` ago | Skipped: no worker, no label moves. |
-| Differs (an input changed, or a new rubric)  | Yes.      |
-| Matches, taken `retriage.maxSkipDays` or more ago | Yes.  |
-| None (another route to `q:human`, or written before fingerprints) | Yes. |
+| Fingerprint                                                        | Re-triage |
+| ------------------------------------------------------------------ | --------- |
+| Matches                                                            | No.       |
+| Differs (an input changed, or a new rubric)                        | Yes.      |
+| None (another route to `q:human`, or written before fingerprints)  | No.       |
 
-The log reports `re-triage: k of n changed`, with the moved and skipped counts.
-
-Deferred rechecks are not gated: a defer waits on something outside the issue (a CD run, a release, a deploy), which the fingerprint cannot see.
+The stall fallback replaced a daily re-triage of every `q:human` issue (`retriage.*`, removed).
 
 ## Red base
 
