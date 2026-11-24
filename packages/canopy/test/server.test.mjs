@@ -251,3 +251,10 @@ test('resolveSettings: briefs live under the cambium home; repo paths come from 
   assert.equal(s.briefs.dir, '/h/cam/briefs')
   assert.deepEqual(s.briefs.paths, { [REPO]: '/h/src/mono' })
 })
+
+test('the health tab renders each repo: watched workflows, budget and a paused read', async () => {
+  const { PAGE } = await import('../src/page.mjs')
+  assert.match(PAGE, /body\.push\(summary\(d\), repos\(d, now\)/)
+  assert.match(PAGE, /const WATCH = \{ green: \['ok', 'green'\], red: \['err', 'red'\], unknown: \['', 'unknown'\] \}/)
+  assert.match(PAGE, /if \(r\.pausedUntil\) out\.push\(h\('div', \{ class: 'banner' \}/)
+})

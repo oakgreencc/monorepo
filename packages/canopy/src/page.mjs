@@ -200,6 +200,7 @@ h2 .n{color:var(--faint);font-weight:400;margin-left:6px}
 .session .cmd{display:flex;align-items:flex-start;gap:var(--s2)}.session code{flex:1;padding:5px 10px;border:1px solid var(--line);border-radius:.625rem;background:var(--bg);overflow-wrap:anywhere;user-select:all}
 .banner{padding:10px var(--s4);border-radius:.75rem;border:1px solid var(--line);background:var(--panel)}
 .banner.err{border-color:color-mix(in srgb,var(--err) 45%,var(--line))}.banner.warn{border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
+.watch{list-style:none;margin:0;padding:0}.watch li+li{margin-top:2px}
 .detail{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:var(--s4);align-items:start}
 .stats{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s4);margin-top:var(--s3);padding-top:var(--s3);border-top:1px solid var(--line)}.stat b{font-size:18px;font-weight:400;color:var(--strong);margin-right:5px}
 .steps{display:flex;flex-wrap:wrap;gap:var(--s1)}.steps+.err{margin-top:var(--s1)}
@@ -469,7 +470,13 @@ function banners(s, now) {
   else if (hb.stale) out.push(h('div', { class: 'banner warn' }, h('b', {}, 'cambium may have stopped: '), hb.message))
   for (const r of s.github.repos) if (!r.ok) out.push(h('div', { class: 'banner err' }, h('b', {}, 'GitHub read failed for ' + r.slug + ': '), r.error,
     r.fetchedAt ? '. Showing what it returned ' + ago(r.fetchedAt, now) + '.' : ". Its issues and PRs aren't shown."))
-  for (const r of (hb.data && hb.data.repos) || []) if (!r.ok) out.push(h('div', { class: 'banner warn' }, h('b', {}, 'cambium could not read ' + r.slug + ': '), r.error || 'no reason given'))
+  for (const r of (hb.data && hb.data.repos) || []) {
+    if (r.pausedUntil) out.push(h('div', { class: 'banner' }, h('b', {}, 'Reads paused for ' + r.slug + ': '), 'the GraphQL budget is spent, so cambium waits for it to reset ' + until(r.pausedUntil, now) + '. Nothing is failing.'))
+    else if (!r.ok) out.push(h('div', { class: 'banner warn' }, h('b', {}, 'cambium could not read ' + r.slug + ': '), r.error || 'no reason given'))
+    for (const w of r.watch) if (w.state === 'red') out.push(h('div', { class: 'banner err' }, h('b', {}, w.workflow + ' is red' + (w.branch ? ' on ' + w.branch : '') + ' in ' + r.slug + ': '),
+      w.run && w.run.url ? link(w.run.url, 'the newest run') : 'the newest run', ' concluded ' + ((w.run && w.run.conclusion) || 'failing'),
+      w.issue ? [' · ', link('https://github.com/' + r.slug + '/issues/' + w.issue, 'watch issue #' + w.issue)] : null))
+  }
   for (const n of s.notes || []) out.push(h('div', { class: 'banner' }, n))
   return out
 }
@@ -485,6 +492,36 @@ function summary(d) {
     h('span', { class: 'pill ' + (st.ok ? 'ok' : 'err'), title: st.error || '' }, st.name, ' ', h('span', { class: 'faint' }, st.ms != null ? dur(st.ms) : ''))) : h('span', { class: 'empty' }, 'no steps recorded for this tick'))
   const errs = d.steps.filter((st) => !st.ok && st.error).map((st) => h('div', { class: 'err mono' }, st.name + ': ' + st.error))
   return section('Last tick', null, steps, errs, stats)
+}
+
+// Past or future: "in 12m" for a reset still to come, "5m ago" for one already due.
+const until = (iso, now) => { const ms = Date.parse(iso) - now; return !isFinite(ms) ? 'at an unknown time' : ms > 0 ? 'in ' + dur(ms) + ' (' + new Date(iso).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit' }) + ')' : dur(-ms) + ' ago' }
+const WATCH = { green: ['ok', 'green'], red: ['err', 'red'], unknown: ['', 'unknown'] }
+
+// Each repo cambium reads: whether its last read worked, the GraphQL budget left, and its watched workflows.
+function repos(d, now) {
+  const rows = d.repos.map((r) => {
+    const read = r.pausedUntil ? h('span', { class: 'pill warn', title: r.error || '' }, 'paused')
+      : r.ok ? h('span', { class: 'pill ok' }, 'read') : h('span', { class: 'pill err', title: r.error || '' }, 'read failed')
+    const rl = r.rateLimit
+    const budget = r.pausedUntil ? h('span', {}, 'spent · resets ' + until(r.pausedUntil, now))
+      : rl ? h('span', { title: rl.cost != null ? 'Each read costs ' + rl.cost : null }, rl.remaining.toLocaleString() + ' left', rl.resetAt ? h('span', { class: 'faint' }, ' · resets ' + until(rl.resetAt, now)) : null)
+      : h('span', { class: 'faint' }, 'not reported')
+    const watch = r.watch.length ? h('ul', { class: 'watch' }, r.watch.map((w) => {
+      const [tone, word] = WATCH[w.state] || WATCH.unknown
+      const name = w.workflow + (w.branch ? ' @ ' + w.branch : '')
+      return h('li', {}, h('span', { class: 'pill ' + tone, title: w.run && w.run.conclusion ? 'newest run: ' + w.run.conclusion : 'no completed run read yet' }, word), ' ',
+        w.run && w.run.url ? link(w.run.url, name) : h('span', {}, name),
+        w.issue ? [' · ', link('https://github.com/' + r.slug + '/issues/' + w.issue, '#' + w.issue)] : null,
+        w.checkedAt ? h('span', { class: 'faint' }, ' · checked ' + ago(w.checkedAt, now)) : null,
+        w.error ? h('span', { class: 'warn', title: w.error }, ' · ' + w.error) : null)
+    })) : h('span', { class: 'faint' }, 'none')
+    return h('tr', {}, h('td', {}, link('https://github.com/' + r.slug, r.slug)), h('td', {}, read), h('td', {}, budget), h('td', {}, watch))
+  })
+  if (!rows.length) return section('Repositories', 0, h('div', { class: 'empty' }, 'cambium lists no repositories'))
+  return section('Repositories', rows.length, h('div', { class: 'scroll', tabindex: 0, 'aria-label': 'Repositories table' }, h('table', {},
+    h('thead', {}, h('tr', {}, ['repo', 'last read', 'GraphQL budget', 'watched workflows'].map((t) => h('th', {}, t)))),
+    h('tbody', {}, rows))))
 }
 
 function item(i, multi, now) {
@@ -1123,8 +1160,12 @@ function healthOf(s) {
   const failedSteps = d.steps.filter((st) => !st.ok).map((st) => st.name)
   if (failedSteps.length) return ['err', failedSteps.join(', ') + ' failed in the last tick']
   if (d.workers.some((w) => w.killedReason)) return ['err', 'a worker was killed']
+  const red = d.repos.flatMap((r) => r.watch.filter((w) => w.state === 'red').map((w) => w.workflow))
+  if (red.length) return ['err', red.join(', ') + ' red']
   if (hb.stale) return ['warn', 'no recent tick']
   if (d.mode !== 'running') return ['warn', 'cambium is ' + d.mode]
+  const paused = d.repos.filter((r) => r.pausedUntil).map((r) => r.slug)
+  if (paused.length) return ['warn', 'reads paused for ' + paused.join(', ')]
   return ['ok', 'healthy']
 }
 
@@ -2056,7 +2097,7 @@ function render(s) {
   if (tab === 'traces') body.push(tracesTab(now))
   if (tab === 'intake') body.push(...intakeTab(s, now))
   if (tab === 'health') {
-    if (d) body.push(summary(d), h('div', { class: 'detail' }, workers(d, s.heartbeat.ageMs), events(d)))
+    if (d) body.push(summary(d), repos(d, now), h('div', { class: 'detail' }, workers(d, s.heartbeat.ageMs), events(d)))
     else body.push(section('Health', null, h('div', { class: 'empty' }, 'Ticks, workers and events appear once cambium writes a readable heartbeat; see the message above.')))
   }
   tabs(s)

@@ -41,7 +41,7 @@ The header always shows mode and last tick. The tab is kept in the URL hash.
 | Graphs | `#graphs`, `#graphs/<name>` | Each cambium graph drawn, with the last 24 hours of moves replayed. |
 | Traces | `#traces`, `#traces/<trace id>` | One row per traced run; a span waterfall per run. |
 | Intake | `#intake` | mycelium's sources: which are configured, each one's state, last pass and filings; what the rest lack; recent filings. |
-| Health | `#health` | Last tick, workers, events. |
+| Health | `#health` | Last tick, repositories, workers, events. |
 
 ### Inbox groups
 
@@ -96,6 +96,18 @@ Read from mycelium's [status file](/reference/mycelium/#status-file); filings ar
 | failing | The last pass failed. Its error is shown under the row. |
 | overdue | The next pass is more than 2 minutes, or one interval, late. When every source is overdue, mycelium is reported as possibly stopped. |
 | stopped | mycelium stopped cleanly. |
+
+### Repositories
+
+From the heartbeat's [`repos[]`](/reference/cambium/heartbeat/#top-level). One row per repository on the Health tab.
+
+| Column | Shows |
+| --- | --- |
+| last read | `read`, `read failed` (error on hover) or `paused`. |
+| GraphQL budget | Points left after the last read and when the budget resets. `spent` with the reset time while paused. `not reported` for a heartbeat without `rateLimit`. |
+| watched workflows | Each workflow and branch: `green`, `red` or `unknown`. The name links to the newest completed run; `#<n>` links to the open `watch` issue. |
+
+A paused repository is one whose reads cambium stopped until the budget resets. It gets a neutral banner, not a failure banner, and turns the health dot amber. A `red` workflow gets a red banner linking to the run and the `watch` issue, and turns the health dot red. Heartbeats without `watch` or `rateLimit` show no workflows and an unreported budget.
 
 ### Cost
 

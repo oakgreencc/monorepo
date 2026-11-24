@@ -89,3 +89,91 @@ test('readHeartbeat: a read error other than ENOENT is unreadable', async () => 
   assert.equal(hb.status, 'unreadable')
   assert.match(String(hb.message), /permission denied/)
 })
+
+const REPO = 'oakgreencc/monorepo'
+const run = (/** @type {string} */ conclusion) => ({
+  id: 7,
+  url: `https://github.com/${REPO}/actions/runs/7`,
+  sha: 'abcdef1234',
+  conclusion,
+  at: '2026-11-24T10:00:00Z',
+})
+/** @param {Record<string, unknown>} repo */
+const withRepo = (repo) =>
+  judge(heartbeat({ repos: [{ slug: REPO, ok: true, error: null, counts: null, ...repo }] }), { now: T0 }).data.repos[0]
+
+test('watched workflows: green, red and unknown keep their run and watch issue', () => {
+  const r = withRepo({
+    watch: [
+      {
+        workflow: 'deploy.yml',
+        branch: 'main',
+        state: 'green',
+        run: run('success'),
+        issue: null,
+        checkedAt: '2026-11-24T10:01:00Z',
+        error: null,
+      },
+      {
+        workflow: 'release.yml',
+        branch: 'main',
+        state: 'red',
+        run: run('failure'),
+        issue: 41,
+        checkedAt: '2026-11-24T10:01:00Z',
+        error: null,
+      },
+      {
+        workflow: 'nightly.yml',
+        branch: 'main',
+        state: 'unknown',
+        run: null,
+        issue: null,
+        checkedAt: null,
+        error: null,
+      },
+    ],
+  })
+  assert.deepEqual(
+    r.watch.map((/** @type {any} */ w) => [w.workflow, w.state, w.run?.url ?? null, w.issue]),
+    [
+      ['deploy.yml', 'green', `https://github.com/${REPO}/actions/runs/7`, null],
+      ['release.yml', 'red', `https://github.com/${REPO}/actions/runs/7`, 41],
+      ['nightly.yml', 'unknown', null, null],
+    ],
+  )
+  assert.equal(r.watch[1].run.conclusion, 'failure')
+})
+
+test('a watch state canopy does not know reads as unknown; one without a workflow is dropped', () => {
+  const r = withRepo({ watch: [{ workflow: 'x.yml', state: 'purple' }, { state: 'red' }, null] })
+  assert.deepEqual(
+    r.watch.map((/** @type {any} */ w) => [w.workflow, w.state, w.branch, w.run]),
+    [['x.yml', 'unknown', null, null]],
+  )
+})
+
+test('the GraphQL budget left and its reset come through', () => {
+  const r = withRepo({ rateLimit: { cost: 3, remaining: 4120, resetAt: '2026-11-24T11:00:00Z' } })
+  assert.deepEqual(r.rateLimit, { cost: 3, remaining: 4120, resetAt: '2026-11-24T11:00:00Z' })
+  assert.equal(r.pausedUntil, null)
+})
+
+test('a repo paused for budget is marked paused, not just failed', () => {
+  const r = withRepo({
+    ok: false,
+    error: 'GraphQL budget spent; reads paused until 2026-11-24T11:00:00.000Z',
+    rateLimit: null,
+  })
+  assert.equal(r.pausedUntil, '2026-11-24T11:00:00.000Z')
+  assert.equal(r.rateLimit, null)
+  const failed = withRepo({ ok: false, error: 'HTTP 502' })
+  assert.equal(failed.pausedUntil, null)
+})
+
+test('an older heartbeat without watch or rateLimit still reads: none watched, budget unknown', () => {
+  const r = judge(heartbeat(), { now: T0 }).data.repos[0]
+  assert.deepEqual(r.watch, [])
+  assert.equal(r.rateLimit, null)
+  assert.equal(r.pausedUntil, null)
+})
