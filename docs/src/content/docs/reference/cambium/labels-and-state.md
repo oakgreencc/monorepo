@@ -74,10 +74,10 @@ The graph engine writes v2 without `stage`. `node` is where the issue rests; `gr
 | `deferUntil`, `deferReason` | Set at `deferred`.                                                   |
 | `blockedBy`                 | Open blocking issues, set at `blocked`.                              |
 | `reply`                     | Human replies quoted to the next triage, until it lands a verdict.   |
-| `ask`                       | At `to-human`: what the person is asked (`kind`, `question`, `options`, `recommendation`, `interactive`). |
+| `ask`                       | At `to-human`: what the person is asked (`kind`, `question`, `options`, `recommendation`, `interactive`, `lens`). |
 | `traceparent`               | W3C traceparent of the issue's trace; `null` with tracing off.       |
 
-At `to-human`, the comment renders the `ask` under the status line: the question, the numbered options with their tradeoffs, the recommendation, and how to answer.
+At `to-human`, the comment renders the `ask` under the status line: the question, the numbered options with their tradeoffs, the recommendation, the lens, and how to answer.
 
 A marker at a node the current graph version no longer has restarts at the entry node with a `graph-changed` history entry.
 

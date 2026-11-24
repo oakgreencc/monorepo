@@ -210,7 +210,7 @@ GC skips the checkout itself, worker worktrees and locked worktrees (a Claude Co
 
 Worker logs: `<paths.logs>/<owner>__<name>/issue-<n>/a<attempt>-<stamp>.{prompt.md,out.log,err.log}`.
 
-Session briefs: `<paths.home>/briefs/<owner>__<name>/issue-<n>.md`, one per open `q:human` issue labelled `why:budget`. Each tick rewrites a brief whose content changed and deletes it once the issue leaves `q:human` or closes. A brief holds the issue's title, link, body (first 4,000 characters) and acceptance checks; its attempts, reworks, last failure, failed SHA and history; its agent PRs; the reasons earlier attempts failed; the repository path; and the verify and publish commands. Token-shaped text is replaced with `[redacted]`. Files are mode `0600`.
+Session briefs: `<paths.home>/briefs/<owner>__<name>/issue-<n>.md`, one per open `q:human` issue labelled `why:budget`, or labelled both `ask:decide` and `ask:session`. Each tick rewrites a brief whose content changed and deletes it once the issue leaves `q:human` or closes. A brief holds the issue's title, link, body (first 4,000 characters) and acceptance checks; its attempts, reworks, last failure, failed SHA and history; its agent PRs; the reasons earlier attempts failed; the question, options, recommendation and lens when there is an ask; the repository path; and the verify and publish commands. A brief for an `ask:decide` + `ask:session` issue tells the session to start with `/oakgreen:decide` and names the ask's `lens` (`product` or `technical`, which triage picks for every interactive decide). Token-shaped text is replaced with `[redacted]`. Files are mode `0600`.
 
 ## `graft`, `worker`
 

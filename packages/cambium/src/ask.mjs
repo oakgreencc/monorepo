@@ -11,12 +11,16 @@
  * - `chore`: offline work (a store listing, paperwork, a console setting); a checklist, not a session.
  * - `approve`: a yes or no on something already written.
  * `interactive`: whether a live session with the code would help answer it.
+ * `lens`: for a `decide` worked through in a session, which kind of decision it is, so the session (`/oakgreen:decide`)
+ * frames it right: `product` (what users get: scope, behaviour, wording, priority) or `technical` (how it is built:
+ * architecture, interfaces, dependencies, data). Required on an interactive decide; an unknown value reads as absent.
  */
 import { z } from 'zod'
 
 export const ASK_KINDS = /** @type {const} */ (['decide', 'verify', 'chore', 'approve'])
 /** Marks an ask whose answer a live session with the code would help (`interactive`). */
 export const ASK_SESSION = 'ask:session'
+export const ASK_LENSES = /** @type {const} */ (['product', 'technical'])
 
 const text = z.string().trim().min(1)
 
@@ -30,10 +34,16 @@ export const Ask = z
       .optional(),
     recommendation: text.optional(),
     interactive: z.boolean(),
+    // An unknown lens reads as none: dropped where it is optional; where it is required the refine below fails.
+    lens: z.enum(ASK_LENSES).optional().catch(undefined),
   })
   .refine((a) => a.kind !== 'decide' || (a.options?.length ?? 0) >= 2, {
     message: 'a decide ask needs two or more options',
     path: ['options'],
+  })
+  .refine((a) => !(a.kind === 'decide' && a.interactive) || a.lens !== undefined, {
+    message: `an interactive decide ask needs a lens (${ASK_LENSES.join(' or ')})`,
+    path: ['lens'],
   })
 
 /** @typedef {z.infer<typeof Ask>} AskT */
@@ -100,6 +110,7 @@ export function renderAsk(ask) {
       ? ['', ...ask.options.map((o, i) => `${i + 1}. **${one(o.label)}**: ${one(o.detail)}`)]
       : []),
     ...(ask.recommendation ? ['', `**Recommendation:** ${one(ask.recommendation)}`] : []),
+    ...(ask.lens ? ['', `**Lens:** ${ask.lens}`] : []),
     '',
     `_${
       ask.kind === 'decide' && ask.options?.length

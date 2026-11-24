@@ -46,8 +46,12 @@ function setup(issues) {
   return { ...h, dir, path: briefPath(dir, SLUG, 5), done: () => rmSync(dir, { recursive: true, force: true }) }
 }
 
-test('one function decides who gets a brief: q:human with why:budget', () => {
+test('one function decides who gets a brief: q:human with why:budget, or with ask:decide + ask:session', () => {
   assert.equal(isSessionCandidate({ labels: ['q:human', 'why:budget'] }), true)
+  assert.equal(isSessionCandidate({ labels: ['q:human', 'why:triage', 'ask:decide', 'ask:session'] }), true)
+  assert.equal(isSessionCandidate({ labels: ['q:human', 'why:triage', 'ask:decide'] }), false)
+  assert.equal(isSessionCandidate({ labels: ['q:human', 'why:triage', 'ask:chore', 'ask:session'] }), false)
+  assert.equal(isSessionCandidate({ labels: ['q:intake', 'ask:decide', 'ask:session'] }), false)
   assert.equal(isSessionCandidate({ labels: ['q:human', 'why:triage'] }), false)
   assert.equal(isSessionCandidate({ labels: ['q:human', 'why:approve'] }), false)
   assert.equal(isSessionCandidate({ labels: ['q:task', 'why:budget'] }), false)
@@ -140,6 +144,49 @@ test('ask fields appear when the marker has them; decide options render as `N. *
   )
   assert.ok(!brief.includes('[object Object]'))
   assert.ok(brief.includes('Recommendation: peg'))
+})
+
+const decideAsk = /** @type {any} */ ({
+  kind: 'decide',
+  question: 'Flag or default?',
+  options: [
+    { label: 'Flag', detail: 'opt-in' },
+    { label: 'Default', detail: 'everyone' },
+  ],
+  recommendation: 'Flag',
+  interactive: true,
+  lens: 'product',
+})
+const DECIDE = ['q:human', 'why:triage', 'ask:decide', 'ask:session']
+
+test('a decide + session item gets a brief naming the lens and /oakgreen:decide; deleted on leaving q:human', async (t) => {
+  const s = setup([issue(DECIDE, { graph: 'dispatch', node: 'to-human', ask: decideAsk })])
+  t.after(s.done)
+  await tick(s.deps)
+  const brief = readFileSync(s.path, 'utf8')
+  for (const want of [
+    'Start by running `/oakgreen:decide` (lens: product)',
+    '## The question\n\nFlag or default?',
+    '1. **Flag**: opt-in\n2. **Default**: everyone',
+    'Recommendation: Flag',
+    'Lens: product',
+  ])
+    assert.ok(brief.includes(want), `brief lacks ${JSON.stringify(want)}`)
+  assert.ok(!brief.includes('what went wrong'), 'a decision is not a failure')
+
+  await s.gh.github.label(SLUG, 5, { add: ['q:intake'], remove: DECIDE })
+  await tick(s.deps)
+  assert.equal(existsSync(s.path), false)
+})
+
+test('a decide + session brief is deleted when the issue closes', async (t) => {
+  const s = setup([issue(DECIDE, { graph: 'dispatch', node: 'to-human', ask: decideAsk })])
+  t.after(s.done)
+  await tick(s.deps)
+  assert.ok(existsSync(s.path))
+  await s.gh.github.close(SLUG, 5, 'done')
+  await tick(s.deps)
+  assert.equal(existsSync(s.path), false)
 })
 
 test('briefs carry no token text', async (t) => {
