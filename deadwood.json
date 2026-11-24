@@ -1,0 +1,18 @@
+{
+  "markdown": {
+    "allow": [
+      "**/README.md",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "docs/*.md",
+      "docs/src/content/docs/**",
+      "docs/agents/*.md",
+      "docs/.impeccable/**",
+      "packages/*/PRODUCT.md",
+      "packages/*/CONTEXT.md",
+      "packages/*/docs/*.md",
+      "packages/*/skills/**/*.md"
+    ]
+  },
+  "overrides": [{ "files": ["packages/*/test/**"], "comments": false }]
+}

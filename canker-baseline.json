@@ -1,0 +1,76 @@
+{
+  "packages/cambium/src/briefs.mjs": {
+    "renderBrief": 31
+  },
+  "packages/cambium/src/cli.mjs": {
+    "gc": 42
+  },
+  "packages/cambium/src/config.mjs": {
+    "resolveConfig": 36
+  },
+  "packages/cambium/src/github.mjs": {
+    "normalize": 37
+  },
+  "packages/cambium/src/graph/validate.mjs": {
+    "validateGraph": 38.2
+  },
+  "packages/cambium/src/graphs/pr.mjs": {
+    "run": 35
+  },
+  "packages/cambium/src/phases/rescue.mjs": {
+    "findStuck": 67
+  },
+  "packages/cambium/src/tracing.mjs": {
+    "workerSpans#2": 103.03
+  },
+  "packages/cambium/src/update.mjs": {
+    "<anonymous>#2": 42
+  },
+  "packages/canopy/src/graph-layout.mjs": {
+    "layoutGraph": 57
+  },
+  "packages/canopy/src/markdown.mjs": {
+    "blocks": 47.72
+  },
+  "packages/deadwood/src/comments.mjs": {
+    "scanComments": 36
+  },
+  "packages/graft/src/cli/api.mjs": {
+    "runApi": 66.81,
+    "runJobs": 100.33
+  },
+  "packages/graft/src/cli/protected.mjs": {
+    "run": 210
+  },
+  "packages/graft/src/cli/publish.mjs": {
+    "runMerge": 85.42
+  },
+  "packages/graft/src/cli/validate.mjs": {
+    "run": 182
+  },
+  "packages/graft/src/github/app.mjs": {
+    "cachedInstallationToken": 82.17
+  },
+  "packages/graft/src/setup/doctor.mjs": {
+    "run": 1613.91
+  },
+  "packages/graft/src/setup/index.mjs": {
+    "run": 306
+  },
+  "packages/graft/src/setup/project.mjs": {
+    "suggestValidate": 77.87,
+    "setupProject": 5040.33
+  },
+  "packages/mycelium/src/cli.mjs": {
+    "main": 43.56
+  },
+  "packages/oakgreen/src/cli.mjs": {
+    "main": 35.02
+  },
+  "packages/oakgreen/src/tools.mjs": {
+    "<anonymous>#2": 56
+  },
+  "packages/runner-watchdog/src/runner-watchdog.mjs": {
+    "appendLog": 42
+  }
+}
