@@ -133,7 +133,7 @@ One JSON file. Everything but `repos` is optional; these are the defaults:
   "watchEveryMinutes": 5,
   "merge": "none",
   "priorityLabels": ["priority:critical", "priority:high", "priority:medium", "priority:low"],
-  "release": { "enabled": false, "time": "06:00" },
+  "release": { "enabled": false, "time": "06:00", "readEveryMinutes": 5 },
   "reaper": { "everyMinutes": 60, "staleMinutes": 30, "orphanDays": 3 },
   "retriage": { "enabled": false, "time": "05:00", "maxSkipDays": 14 },
   "rescue": {
@@ -175,7 +175,7 @@ One JSON file. Everything but `repos` is optional; these are the defaults:
 - `repos[].phases`: per-repo overrides of `wallClockMinutes` and `maxTurns`, by phase (`{ "task": { "wallClockMinutes": 120 } }`); other keys are refused. `capsFor` in `src/config.mjs` merges them over the global `phases`.
 - `repos[].watch`: workflows whose newest completed push or schedule run on a branch must be green (`src/watch.mjs`). Each entry is a workflow file name, or `{ "workflow", "branch", "issue" }` (`branch` defaults to `baseBranch`, `issue` to `true`). Read every `watchEveryMinutes` (default 5; `0` off); cancelled and skipped runs are passed over. Red → a `warn` event and, with `issue`, one `q:human` issue labelled `watch` (`q:human` alone when the repo lacks the label; a later failing run comments on it). Green again → an `info` event and the issue is closed. A failed read keeps the last verdict. Verdicts live in the store (`watch:<repo>:<workflow>@<branch>`) and the heartbeat (`repos[].watch`).
 - `mergeStallMinutes` (default 20; `0` off): an agent PR with auto-merge armed and green checks that GitHub still reports `BLOCKED` (`mergeStateStatus`) this long after arming goes to `q:human` + `why:approve` with outcome `merge-blocked`. A rule cambium cannot read holds it (a ruleset review, approval for unattributed changes, a required check that never reported); `mergeQueueMinutes` would otherwise wait two hours and say nothing about why.
-- `repos[].release` (`engine: "graph"`): `{ "enabled", "time", "from", "to", "check" }`. `enabled` and `time` default to the top-level `release`, `from` to the repo's `baseBranch`, `to` to `"main"`, `check` to the repo's `requiredCheck` (`null`: cut at the tip). A repo whose `from` equals `to` has no promotion PR. Example: `{ "slug": "o/app", "path": "~/app", "baseBranch": "develop", "release": { "enabled": true, "time": "06:00", "from": "develop", "to": "main" } }`.
+- `repos[].release` (`engine: "graph"`): `{ "enabled", "time", "readEveryMinutes", "from", "to", "check" }`. `enabled`, `time` and `readEveryMinutes` (default 5) default to the top-level `release`, `from` to the repo's `baseBranch`, `to` to `"main"`, `check` to the repo's `requiredCheck` (`null`: cut at the tip). A repo whose `from` equals `to` has no promotion PR. Example: `{ "slug": "o/app", "path": "~/app", "baseBranch": "develop", "release": { "enabled": true, "time": "06:00", "from": "develop", "to": "main" } }`.
 
 ### Target repo convention
 
@@ -555,12 +555,12 @@ With `"engine": "graph"`, for every repo whose `release.from` ≠ `release.to` (
 
 - **On merge.** A merged agent PR among the PRs on `from` not yet in `to` (the comparison's `merged`) puts `q:promote` on each closed, cambium-owned issue it closes; close-out still closes the issue.
 - **On promotion.** A closed `q:promote` issue whose PR (the marker's `pr`, else a merged PR closing it) is no longer ahead of `to` loses `q:promote`. Skipped while `to` is missing or `from` is more than 100 commits ahead, since the comparison lists only the last 100.
-- **Read.** For such a repo the snapshot always asks for the comparison and for the closed issues labelled `q:promote`; the release graphs still run only when `enabled`.
+- **Read.** For such a repo the snapshot asks for the comparison and for the closed issues labelled `q:promote` every `release.readEveryMinutes` (default 5; `0` every tick), in memory between reads; the release graphs still run only when `enabled`. Every tick reads the tips of `from` and `to` (cheap): a tip that moved (a merge) forces the read on the next tick, so `q:promote` comes off promptly. So does a cambium write to a promotion PR; a write to a kept `q:promote` issue drops it from the kept answer. A restart reads at once.
 
 canopy's Promote lane lists these issues. A repo with `from` = `to` (e.g. releasing from `main` itself) has nothing to await, and the legacy engine does not track it.
 
 - **No timeouts.** Neither graph has one; the daily `cleanup` is the only 24 h rule.
-- **Read.** With a repo's release on, the snapshot query also asks (in the same query) for the open PRs from `from` to `to`, the PRs labelled `q:promote`, and `to`'s comparison with `from` (`aheadBy`, and the merged PRs on the last 100 commits ahead).
+- **Read.** The snapshot query also asks (in the same query) for the open PRs from `from` to `to`, the PRs labelled `q:promote`, and `to`'s comparison with `from` (`aheadBy`, and the merged PRs on the last 100 commits ahead), every `release.readEveryMinutes` ([Awaiting promotion](#awaiting-promotion)). The graphs run only on a tick that read it (`Release.fresh`); `cambium run release-*` always reads.
 - **Legacy.** `engine: "legacy"` keeps the stub.
 
 ## The rescue graph

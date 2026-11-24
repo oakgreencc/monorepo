@@ -357,6 +357,7 @@ test('graft client: every call is one graft invocation, as the Clock App, in the
     name: 'r',
     labels: ['q:intake', 'q:task', 'q:human', 'q:promote'],
     release: false,
+    tips: false,
     from: '',
     to: '',
     health: true,
