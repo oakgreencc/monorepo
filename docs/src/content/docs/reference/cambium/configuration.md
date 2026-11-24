@@ -37,6 +37,7 @@ One JSON file: `--config`, else `$CAMBIUM_CONFIG`, else `~/.cambium/config.json`
   "release": { "enabled": false, "time": "06:00" },
   "reaper": { "everyMinutes": 60, "staleMinutes": 30, "orphanDays": 3 },
   "retriage": { "enabled": false, "time": "05:00", "maxSkipDays": 14 },
+  "intake": { "adopt": true, "ignoreLabels": [] },
   "rescue": {
     "everyMinutes": 60,
     "staleHours": 12,
@@ -82,6 +83,13 @@ A file that does not load, or has no `repos`, keeps the running config and logs 
 | `merge`              | `"none"`   | Who merges a Task PR: `"none"` (merge queue, auto-merge or a human) or `"green"` (cambium, once CI is green; graph engine). Overridable per repo. |
 | `priorityLabels`     | four `priority:*` | Scheduling order, first is highest. Unlabelled issues sort after all of them.                     |
 | `costFlagUsd`        | `10`       | US dollars. An issue whose task-phase [cost](/reference/cambium/labels-and-state/#cost) is over this, with no merged PR, is flagged in the heartbeat and in canopy's Inbox as a session candidate. `0` turns the flag off. |
+
+## `intake`
+
+| Key                   | Default | Meaning                                                                                                   |
+| --------------------- | ------- | --------------------------------------------------------------------------------------------------------- |
+| `intake.adopt`        | `true`  | An open issue in no queue gains `q:intake`, so it is triaged without anyone adding the label. Skipped: issues cambium has handled (they have a state comment), issues an agent PR names, and issues labelled `watch`, `red-base` or `rescue`. |
+| `intake.ignoreLabels` | `[]`    | Issues with any of these labels are never adopted, such as tracking or parent issues.                     |
 
 ## `repos[]`
 

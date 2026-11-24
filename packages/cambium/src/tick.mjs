@@ -14,6 +14,7 @@ import { failureSummary, iso, key, markerOf, MIN, setLabels, setMarker } from '.
 import { GRAPH_ENGINE, GRAPHS } from './graph-engine.mjs'
 import { describeGraph } from './graph/describe.mjs'
 import { linkIssue, prFor, taskExit, taskPrompt } from './phases/task.mjs'
+import { adopt } from './adopt.mjs'
 import { branchName } from './convention.mjs'
 import { PREPARE_FAILED_LINE } from './prepare.mjs'
 import { releaseDue, releaseNotBuilt } from './phases/release.mjs'
@@ -98,6 +99,7 @@ export async function tick(deps) {
           ['reconcile', engine.reconcile],
           ['watch', engine.watch],
           ['sweep', engine.sweep],
+          ['adopt', adopt],
         ])),
     ...(ctx.mode === 'running' ? /** @type {[string, StepFn][]} */ ([['schedule', schedule]]) : []),
     ...(paused ? [] : /** @type {[string, any][]} */ ([['release', release]])),

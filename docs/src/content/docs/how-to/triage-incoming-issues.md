@@ -24,7 +24,11 @@ Triage needs the graph engine. Without it, `q:intake` issues wait untouched.
    oakgreen restart cambium
    ```
 
-3. File work with the label `q:intake`. Issues from [mycelium](/how-to/connect-intake-sources/) already carry it.
+3. File issues as usual. An open issue in no queue gains `q:intake` on the next tick. To keep tracking or parent issues out of triage, list their label in `intake.ignoreLabels`:
+
+   ```json
+   { "intake": { "ignoreLabels": ["release-area"] } }
+   ```
 
 ## Triage one issue now
 
@@ -34,9 +38,9 @@ cambium run dispatch --issue 42 --repo owner/name
 
 Runs a triage worker in the foreground, whatever the cap, and applies its verdict.
 
-## Make agents file issues the same way
+## Teach agents the labels
 
-`oakgreen setup`, run from a clone, writes `docs/agents/triage-labels.md` and a pointer to it in `CLAUDE.md` or `AGENTS.md`. Agent skills that file issues read it and use `q:intake`. If the guide exists but does not name `q:intake`, `oakgreen doctor` says so; replace it.
+`oakgreen setup`, run from a clone, writes `docs/agents/triage-labels.md` and a pointer to it in `CLAUDE.md` or `AGENTS.md`. Agent skills that file issues read it and use `q:intake` directly, skipping the one-tick wait. If the guide exists but does not name `q:intake`, `oakgreen doctor` says so; replace it.
 
 ## Tune deferral
 

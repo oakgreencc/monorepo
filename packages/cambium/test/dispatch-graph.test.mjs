@@ -631,7 +631,7 @@ test('blocked verdict: links the missing blockedBy, parks with wait:blocked (no 
     issues: [
       { number: 7, labels: ['q:intake'], body: 'Needs #3 and #4 first.' },
       { number: 3, labels: [], state: 'CLOSED' },
-      { number: 4, labels: [] },
+      { number: 4, labels: ['q:task'] }, // a blocker sits in a queue of its own
     ],
   })
   h.gh.issue(7).blockedBy = [blocker(3)]
@@ -686,7 +686,7 @@ test('schedule: an intake issue with an open blockedBy is never triaged; it is p
     issues: [
       { number: 7, labels: ['q:intake'] },
       { number: 8, labels: ['q:intake'] },
-      { number: 3, labels: [] },
+      { number: 3, labels: ['q:task'] }, // a blocker sits in a queue of its own
     ],
   })
   h.gh.issue(7).blockedBy = [blocker(3)]
@@ -729,7 +729,7 @@ test('blocked waits do not count toward maxDefers; a blocked verdict on closed i
     config: { phases: { dispatch: { cap: 1, maxDefers: 1 }, task: { cap: 0 } } },
     issues: [
       { number: 7, labels: ['q:intake'] },
-      { number: 3, labels: [] },
+      { number: 3, labels: ['q:task'] }, // a blocker sits in a queue of its own
       { number: 4, labels: [], state: 'CLOSED' },
     ],
   })
