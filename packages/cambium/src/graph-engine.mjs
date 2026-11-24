@@ -311,10 +311,11 @@ export async function runIssue(deps, { graph, slug, number, follow = false, out,
   if (graph === dispatch.name) return runDispatch(deps, { slug, number, follow, out, sleep, signal })
   /** @type {Set<number>} */
   const reaped = new Set()
+  const source = snapshotSource(deps, slug, { follow, sleep, signal })
   let first = true
   for (;;) {
     const ctx = newCtx(deps)
-    const snap = await deps.github.read(slug)
+    const snap = await source.read()
     ctx.snaps.set(slug, snap)
     const issue = snap.issues.get(number)
     if (issue?.state !== 'OPEN') {
@@ -355,7 +356,7 @@ export async function runIssue(deps, { graph, slug, number, follow = false, out,
       return { ok: false, error: `${slug}#${number} was not started; see its state comment` }
     first = false
     if (turn?.reason === 'end' || !follow || signal?.aborted) return report(out, slug, number, issue)
-    await sleep(deps.config.tickSeconds * 1000)
+    await source.pause()
     if (signal?.aborted) return report(out, slug, number, issue)
   }
 }
@@ -369,9 +370,10 @@ export async function runIssue(deps, { graph, slug, number, follow = false, out,
  * @returns {Promise<{ ok: boolean, error?: string }>}
  */
 async function runPr(deps, { slug, number, follow, out, sleep, signal }) {
+  const source = snapshotSource(deps, slug, { follow, sleep, signal })
   for (let first = true; ; first = false) {
     const ctx = newCtx(deps)
-    const snap = await deps.github.read(slug)
+    const snap = await source.read()
     ctx.snaps.set(slug, snap)
     const issue = snap.issues.get(number)
     const pr = issue ? prFor(snap, { issue: number, branch: issue.stateComment?.marker.branch ?? null }) : null
@@ -386,7 +388,7 @@ async function runPr(deps, { slug, number, follow, out, sleep, signal }) {
       } else out(`PR #${pr.number}: not assessed (CI ${pr.checks ?? 'none'}, ${pr.state.toLowerCase()})`)
     }
     if (!follow || issue?.state !== 'OPEN' || signal?.aborted) return report(out, slug, number, issue)
-    await sleep(deps.config.tickSeconds * 1000)
+    await source.pause()
     if (signal?.aborted) return report(out, slug, number, issue)
   }
 }
@@ -403,9 +405,10 @@ async function runPr(deps, { slug, number, follow, out, sleep, signal }) {
 async function runDispatch(deps, { slug, number, follow, out, sleep, signal }) {
   /** @type {Set<number>} */
   const reaped = new Set()
+  const source = snapshotSource(deps, slug, { follow, sleep, signal })
   for (let first = true; ; first = false) {
     const ctx = newCtx(deps)
-    const snap = await deps.github.read(slug)
+    const snap = await source.read()
     ctx.snaps.set(slug, snap)
     const issue = snap.issues.get(number)
     if (issue?.state !== 'OPEN') {
@@ -442,8 +445,46 @@ async function runDispatch(deps, { slug, number, follow, out, sleep, signal }) {
       return { ok: false, error: `${slug}#${number} was not started; see its state comment` }
     const ended = turn.transitions.some((t) => t.to === END)
     if (ended || !follow || signal?.aborted) return report(out, slug, number, issue)
-    await sleep(deps.config.tickSeconds * 1000)
+    await source.pause()
     if (signal?.aborted) return report(out, slug, number, issue)
+  }
+}
+
+/** How often a follower beside a live daemon looks for the daemon's next snapshot. */
+export const FEED_POLL_MS = 2000
+
+/**
+ * Where `run … --follow` gets each turn's snapshot. Beside a live daemon (`deps.daemonFeed`: a fresh heartbeat and a
+ * usable snapshots file, snapshot-file.mjs) it reads the daemon's snapshot and never GitHub: the first turn takes the
+ * latest one, each later turn waits for one the daemon read after this follower's last turn (so it holds that
+ * turn's writes). Without a daemon (or once its heartbeat goes stale, its file goes missing, or it has not read the
+ * repo for three ticks) it reads GitHub itself every `tickSeconds`, as it always has. A run without `--follow` always
+ * reads GitHub.
+ * @param {Deps} deps @param {string} slug
+ * @param {{ follow: boolean, sleep: (ms: number) => Promise<void>, signal?: AbortSignal }} o
+ */
+export function snapshotSource(deps, slug, { follow, sleep, signal }) {
+  const feed = () => (follow && deps.daemonFeed ? deps.daemonFeed.latest(slug) : { live: false })
+  const tickMs = deps.config.tickSeconds * 1000
+  let first = true
+  return {
+    /** @returns {Promise<import('./github.mjs').Snapshot>} */
+    async read() {
+      // This follower's last turn has ended: a daemon snapshot must have been read after it.
+      const since = first ? -Infinity : deps.clock.now()
+      first = false
+      for (let waited = 0; waited <= 3 * tickMs && !signal?.aborted; waited += FEED_POLL_MS) {
+        const f = feed()
+        if (!f.live) break
+        if (f.snap && f.fetchedAt > since) return f.snap
+        await sleep(FEED_POLL_MS)
+      }
+      return deps.github.read(slug)
+    },
+    /** Between turns: with a live daemon, {@link read} does the waiting. */
+    async pause() {
+      if (!feed().live) await sleep(tickMs)
+    },
   }
 }
 

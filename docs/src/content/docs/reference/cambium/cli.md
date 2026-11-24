@@ -33,7 +33,7 @@ The mode is stored in the SQLite database (`paths.db`, table `control`).
 | `cambium run release-promote [--repo <o/n>] [--issue <pr>]`  | graph   | A [release-promote](/reference/cambium/graphs/#release-promote) turn for each `q:promote` promotion PR, or only `<pr>`. PRs not ready are reported.                       |
 | `cambium run rescue [--repo <o/n>] [--issue <n>]`            | graph   | Without `--issue`: list items the [rescue](/reference/cambium/graphs/#rescue) sweep would find stuck now, with symptoms; changes nothing. With it: rescue that item with a foreground worker and carry out its verdict. |
 
-`run task`, `run pr` and `run dispatch` stop at the first wait that is not ready. `--follow` re-reads and polls every `tickSeconds` until the graph ends (for `run pr`, until the issue is closed).
+`run task`, `run pr` and `run dispatch` stop at the first wait that is not ready. `--follow` re-reads and polls every `tickSeconds` until the graph ends (for `run pr`, until the issue is closed). Beside a live daemon (heartbeat less than 3 ticks old), `--follow` reads the daemon's [snapshots file](/reference/cambium/heartbeat/#snapshots-snapshotsjson) instead of GitHub, waiting for each tick's new snapshot. With no daemon, a stale heartbeat, or a missing or unreadable file, it reads GitHub itself every `tickSeconds`. It also reads GitHub when the daemon has not read the repo for 3 ticks. Without `--follow`, `run` always reads GitHub.
 
 ## Maintenance
 
