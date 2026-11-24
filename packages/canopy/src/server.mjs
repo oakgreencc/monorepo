@@ -20,7 +20,7 @@ export const COST_DAYS_SHOWN = 7
  * @typedef {{
  *   statePath: string,
  *   repos: string[],
- *   queues: { get(slugs: string[]): Promise<import('./queues.mjs').QueueView>, ttlMs?: number },
+ *   queues: { get(slugs: string[]): Promise<import('./queues.mjs').QueueView & { source?: string, fallback?: string | null }>, ttlMs?: number },
  *   readHeartbeat?: (path: string) => Promise<import('./heartbeat.mjs').Heartbeat>,
  *   intakePath?: string,
  *   readIntake?: (path: string, o: { now: number }) => Promise<import('./intake.mjs').IntakeStatus>,
@@ -97,7 +97,16 @@ export async function buildState({
   const slugs = reposFor(repos, heartbeat)
   const read = slugs.length
     ? await queues.get(slugs)
-    : { repos: [], columns: emptyColumns(), prs: [], stranded: [], fetchedAt: null, cached: false }
+    : {
+        repos: [],
+        columns: emptyColumns(),
+        prs: [],
+        stranded: [],
+        fetchedAt: null,
+        cached: false,
+        source: null,
+        fallback: null,
+      }
   const github = withCosts(read, heartbeat.data)
   // Copies: the queue answer is cached and shared between requests.
   const human = briefs

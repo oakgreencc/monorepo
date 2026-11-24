@@ -148,6 +148,7 @@ One JSON file. Everything but `repos` is optional; these are the defaults:
     "home": "~/.cambium",
     "db": "~/.cambium/cambium.db",
     "heartbeat": "~/.cambium/state.json",
+    "queues": "~/.cambium/queues.json",
     "logs": "~/.cambium/logs"
   },
   "logs": { "keepPerIssue": 20, "daemonMaxBytes": 10485760 },
@@ -249,6 +250,31 @@ cambium updates itself only when it is a **global npm install** (`<prefix>/lib/n
 - **`cambium update`** installs, then `launchctl kill TERM gui/<uid>/com.oakgreencc.cambium`: the daemon finishes its tick and exits, and KeepAlive starts the new version. Workers keep running and are re-adopted. When the agent is not loaded it only installs.
 - **`"update": { "auto": true }`** (off by default; reloaded with the config) makes the daemon check every `update.checkMinutes` (default 360, at least 5) between ticks. On a newer version it installs it, logs `updating cambium a → b`, and ends its loop; the process exits and launchd starts the new one. Only when it is the launchd agent (`XPC_SERVICE_NAME=com.oakgreencc.cambium`), since nothing else would bring it back; otherwise, or when it is not a global install, it logs why once and skips. A failed check or install is a warning and is retried at the next check. The last check time is `update.lastCheck` in the SQLite `control` table.
 - The plist is never rewritten, so env added by hand (e.g. `OTEL_*`) survives an update. To pick up a plist change, `oakgreen reload cambium`.
+
+## Queue view (`queues.json`)
+
+Every tick, after the other steps and before the heartbeat (paused too; nothing goes to GitHub), cambium writes canopy's board, built from the tick's snapshots (src/queue-view.mjs), to `paths.queues` (default `~/.cambium/queues.json`), whole and renamed into place. canopy reads it instead of querying GitHub and falls back to GitHub once it is older than 3 ticks. For it, the snapshot also reads each PR's title, draft flag, merge-queue entry, size and check counts by state, each issue's `updatedAt` and its blockers' titles, and the 50 most recently closed unmerged PRs with the issues they would have closed.
+
+```jsonc
+{
+  "version": 1,
+  "writtenAt": "2026-11-16T12:00:30.000Z",
+  "tickSeconds": 30,
+  "repos": [
+    {
+      "slug": "o/r",
+      "ok": true, // false: not read this tick; the board is the last one read, with `error`
+      "error": null,
+      "fetchedAt": "2026-11-16T12:00:30.000Z", // when this board was read
+      "columns": { "intake": [], "waiting": [], "task": [], "running": [], "human": [], "promote": [] },
+      "prs": [], // open agent/* PRs: number, title, branch, draft, checks, tally, queue, mergeState, size, closes
+      "stranded": [] // open issues in no queue whose agent PR closed unmerged; each with `pr`
+    }
+  ]
+}
+```
+
+Items and PRs have canopy's shapes (canopy's README, `/api/state`).
 
 ## Heartbeat (`state.json`)
 

@@ -14,13 +14,13 @@ import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
  * @typedef {{
  *   number: number, title: string, url: string, state: 'OPEN' | 'CLOSED', createdAt: string, body: string,
  *   labels: string[], stateComment: { id: number, marker: import('./marker.mjs').Marker, author?: string | null } | null,
- *   blockedBy: Blocker[], comments?: Comment[],
+ *   blockedBy: Blocker[], comments?: Comment[], updatedAt?: string | null,
  * }} Issue
  *   `stateComment.author`: the login that wrote the state comment (cambium's). `comments`: the newest 20, oldest
  *   first, for human-reply detection (human-reply.mjs).
  * @typedef {{ id?: number, author: string | null, bot: boolean, createdAt: string, body: string }} Comment
  *   `bot`: GitHub says the author is a `Bot` (an App). `id`: GitHub's database id (triage-inputs.mjs).
- * @typedef {{ number: number, state: 'OPEN' | 'CLOSED', closedAt: string | null }} Blocker
+ * @typedef {{ number: number, state: 'OPEN' | 'CLOSED', closedAt: string | null, title?: string, url?: string }} Blocker
  *   An issue GitHub records as blocking this one (the "blocked by" relationship).
  * @typedef {{ name: string, url: string | null, summary: string }} FailingCheck
  * @typedef {{
@@ -30,7 +30,12 @@ import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
  *   mergeable: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN' | null,
  *   reviewDecision: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null, createdAt: string | null,
  *   updatedAt?: string | null, mergedAt?: string | null, mergeState?: string | null, autoMergeAt?: string | null,
+ *   title?: string, draft?: boolean, queue?: { position: number | null, state: string | null } | null,
+ *   additions?: number | null, deletions?: number | null, files?: number | null, counts?: CheckCount[],
  * }} PullRequest
+ *   `title`, `draft`, `queue` (its merge-queue entry), the size and `counts` (check runs and statuses by state) are
+ *   for canopy's board only (queue-view.mjs).
+ * @typedef {{ state: string, count: number }} CheckCount
  *   `mergeable`: GitHub's conflict check against the base (UNKNOWN while it computes). `mergeState`: GitHub's
  *   `mergeStateStatus` (BLOCKED: a rule holds it, whatever its checks say). `autoMergeAt`: when auto-merge was armed. `reviewDecision`: null
  *   when the base requires no review.
@@ -53,10 +58,17 @@ import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
  *   issues: Map<number, Issue>, prs: PullRequest[], release?: Release | null,
  *   base?: import('./base-health.mjs').BaseHealth,
  *   rateLimit?: { cost: number, remaining: number, resetAt: string } | null, unqueued?: Issue[],
+ *   closed?: ClosedPull[],
  * }} Snapshot
  *   `rateLimit`: the GraphQL budget after the snapshot read (tick.mjs `read` pauses before it runs out).
  *   `unqueued`: open issues in no queue and without a lease, oldest first, at most {@link UNQUEUED}; read while
  *   `intake.adopt` is on, for adoption into `q:intake` (adopt.mjs). Not in `issues`.
+ *   `closed`: the newest PRs closed without merging and the issues they would have closed, for the stranded
+ *   items on canopy's board (queue-view.mjs).
+ * @typedef {{
+ *   number: number, title: string, url: string, branch: string, closedAt: string | null,
+ *   closes: { number: number, title: string, url: string, state: string, createdAt: string | null, updatedAt: string | null }[],
+ * }} ClosedPull
  * @typedef {{ sha: string, behind: number, url: string | null }} GreenCommit
  *   `behind`: how many first-parent commits the ref's tip is past it. `url`: the green run.
  * @typedef {{
@@ -103,11 +115,16 @@ import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
  *   an issue is left out.
  */
 
-const PR_FIELDS = `number url headRefName state headRefOid isInMergeQueue body mergeable mergeStateStatus reviewDecision createdAt updatedAt mergedAt
+const PR_FIELDS = `number url title headRefName state headRefOid isDraft isInMergeQueue body mergeable mergeStateStatus reviewDecision createdAt updatedAt mergedAt
+  additions deletions changedFiles
   headRef { id }
   autoMergeRequest { enabledAt }
+  mergeQueueEntry { position state }
   closingIssuesReferences(first: 5) { nodes { number } }
-  commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 50) { nodes {
+  commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 50) {
+    checkRunCountsByState { state count }
+    statusContextCountsByState { state count }
+    nodes {
     __typename
     ... on CheckRun { name conclusion detailsUrl title summary }
     ... on StatusContext { context state targetUrl description }
@@ -136,13 +153,16 @@ export const SNAPSHOT_QUERY = `query($owner: String!, $name: String!, $labels: [
         commits(last: 100) { nodes { associatedPullRequests(first: 3) { nodes { number title baseRefName state } } } }
       }
     }
+    stranding: pullRequests(states: CLOSED, first: 50, orderBy: { field: UPDATED_AT, direction: DESC }) {
+      nodes { number title url headRefName closedAt closingIssuesReferences(first: 5) { nodes { number title url state createdAt updatedAt } } }
+    }
     ${BASE_FIELDS}
   }
 }
 fragment I on Issue {
-  number title url state createdAt body
+  number title url state createdAt updatedAt body
   labels(first: 30) { nodes { name } }
-  blockedBy(first: 20) { nodes { number state closedAt } }
+  blockedBy(first: 20) { nodes { number title url state closedAt } }
   comments(first: 100) { nodes { databaseId body author { login } } }
   recent: comments(last: 20) { nodes { databaseId createdAt body author { login __typename } } }
 }
@@ -282,6 +302,7 @@ function toIssue(n, botLogin) {
     url: n.url ?? '',
     state: n.state,
     createdAt: n.createdAt,
+    updatedAt: n.updatedAt ?? null,
     body: n.body ?? '',
     labels: labelsOf(n),
     stateComment: stateCommentOf(n, botLogin),
@@ -289,6 +310,8 @@ function toIssue(n, botLogin) {
       number: b.number,
       state: b.state === 'OPEN' ? 'OPEN' : 'CLOSED',
       closedAt: b.closedAt ?? null,
+      ...(b.title !== undefined ? { title: b.title ?? '' } : {}),
+      ...(b.url !== undefined ? { url: b.url ?? '' } : {}),
     })),
     comments: (n.recent?.nodes ?? []).filter(Boolean).map((/** @type {any} */ c) => ({
       ...(c.databaseId ? { id: c.databaseId } : {}),
@@ -331,6 +354,24 @@ export function addIssues(snap, data, asked, botLogin = null) {
   for (const p of snap.prs) p.closes = p.closes.filter((n) => snap.issues.has(n))
   return snap
 }
+
+/** The `stranding` part of the answer → {@link ClosedPull}s. @param {any[]} nodes @returns {ClosedPull[]} */
+const closedOf = (nodes) =>
+  nodes.filter(Boolean).map((p) => ({
+    number: p.number,
+    title: p.title ?? '',
+    url: p.url ?? '',
+    branch: p.headRefName ?? '',
+    closedAt: p.closedAt ?? null,
+    closes: (p.closingIssuesReferences?.nodes ?? []).filter(Boolean).map((/** @type {any} */ i) => ({
+      number: i.number,
+      title: i.title ?? '',
+      url: i.url ?? '',
+      state: i.state,
+      createdAt: i.createdAt ?? null,
+      updatedAt: i.updatedAt ?? null,
+    })),
+  }))
 
 /**
  * GraphQL `data` → {@link Snapshot}. Only `agent/*` PRs are kept.
@@ -386,6 +427,18 @@ export function normalize(data, { botLogin = null, release = null, health = null
       createdAt: p.createdAt ?? null,
       updatedAt: p.updatedAt ?? null,
       mergedAt: p.mergedAt ?? null,
+      title: p.title ?? '',
+      draft: Boolean(p.isDraft),
+      queue: p.mergeQueueEntry
+        ? { position: p.mergeQueueEntry.position ?? null, state: p.mergeQueueEntry.state ?? null }
+        : null,
+      additions: p.additions ?? null,
+      deletions: p.deletions ?? null,
+      files: p.changedFiles ?? null,
+      counts: [
+        ...(rollup?.contexts?.checkRunCountsByState ?? []),
+        ...(rollup?.contexts?.statusContextCountsByState ?? []),
+      ],
     })
   }
   const unqueued = repo.unqueued
@@ -397,6 +450,7 @@ export function normalize(data, { botLogin = null, release = null, health = null
     issues,
     prs,
     ...(unqueued ? { unqueued } : {}),
+    ...(repo.stranding ? { closed: closedOf(repo.stranding.nodes ?? []) } : {}),
     ...(release ? { release: normalizeRelease(repo, release, botLogin) } : {}),
     ...(health ? { base: baseHealthOf(repo, health) } : {}),
   }
