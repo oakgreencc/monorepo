@@ -19,8 +19,10 @@ import { branchIssue } from './github.mjs'
 /**
  * @typedef {import('./github.mjs').Issue} Issue
  * @typedef {import('./github.mjs').PullRequest} PullRequest
- * @typedef {{ question?: string, options?: string[], recommendation?: string }} Ask
- *   What a typed escalation asks the human; read from the marker's `ask` when it has one.
+ * @typedef {{ label: string, detail: string }} AskOption
+ * @typedef {{ question?: string, options?: AskOption[], recommendation?: string }} Ask
+ *   What a typed escalation asks the human; read from the marker's `ask` when it has one. Options keep the
+ *   `{ label, detail }` shape of `ask.mjs`'s asks; one without a string label is dropped.
  * @typedef {{
  *   read(path: string): string | null, write(path: string, text: string): void, remove(path: string): void,
  *   list(dir: string): string[],
@@ -97,9 +99,14 @@ const fence = (s) => ['```', s.replace(/```/g, "'''"), '```']
 function askOf(v) {
   if (!v || typeof v !== 'object') return null
   const a = /** @type {Record<string, unknown>} */ (v)
+  const options = (Array.isArray(a.options) ? a.options : []).flatMap((o) =>
+    o && typeof o === 'object' && typeof o.label === 'string' && o.label
+      ? [{ label: o.label, detail: typeof o.detail === 'string' ? o.detail : '' }]
+      : [],
+  )
   const ask = {
     ...(typeof a.question === 'string' && a.question ? { question: a.question } : {}),
-    ...(Array.isArray(a.options) && a.options.length ? { options: a.options.map(String) } : {}),
+    ...(options.length ? { options } : {}),
     ...(typeof a.recommendation === 'string' && a.recommendation ? { recommendation: a.recommendation } : {}),
   }
   return Object.keys(ask).length ? ask : null
@@ -148,7 +155,13 @@ export function renderBrief({ slug, repoPath, issue, prs, maxAttempts, maxRework
   if (ask) {
     out.push('', '## The question')
     if (ask.question) out.push('', ask.question)
-    if (ask.options) out.push('', 'Options:', '', ...ask.options.map((o, i) => `${i + 1}. ${oneLine(o)}`))
+    if (ask.options)
+      out.push(
+        '',
+        'Options:',
+        '',
+        ...ask.options.map((o, i) => `${i + 1}. **${oneLine(o.label)}**: ${oneLine(o.detail)}`),
+      )
     if (ask.recommendation) out.push('', `Recommendation: ${ask.recommendation}`)
   }
   out.push(
