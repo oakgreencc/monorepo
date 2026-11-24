@@ -34,7 +34,7 @@ One JSON file: `--config`, else `$CAMBIUM_CONFIG`, else `~/.cambium/config.json`
   "watchEveryMinutes": 5,
   "merge": "none",
   "priorityLabels": ["priority:critical", "priority:high", "priority:medium", "priority:low"],
-  "release": { "enabled": false, "time": "06:00" },
+  "release": { "enabled": false, "time": "06:00", "readEveryMinutes": 5 },
   "reaper": { "everyMinutes": 60, "staleMinutes": 30, "orphanDays": 3 },
   "retriage": { "enabled": false, "time": "05:00", "maxSkipDays": 14 },
   "intake": { "adopt": true, "ignoreLabels": [] },
@@ -105,7 +105,7 @@ A file that does not load, or has no `repos`, keeps the running config and logs 
 | `phases`        | `{}`               | Per-repo overrides of `wallClockMinutes` and `maxTurns`, by phase: `{ "task": { "wallClockMinutes": 120 } }`. Other keys are refused. |
 | `watch`         | `[]`               | Workflows whose latest run must be green. See [`repos[].watch`](#reposwatch). |
 
-`repos[].release`: `{ "enabled", "time", "from", "to", "check" }`. `enabled` and `time` default to the top-level `release`; `from` to `baseBranch`; `to` to `"main"`; `check` to the repo's `requiredCheck`. A release is cut at the newest `from` commit where `check` is green; `null` cuts at the tip. A repo whose `from` equals `to` has no promotion PR.
+`repos[].release`: `{ "enabled", "time", "readEveryMinutes", "from", "to", "check" }`. `enabled`, `time` and `readEveryMinutes` default to the top-level `release`; `from` to `baseBranch`; `to` to `"main"`; `check` to the repo's `requiredCheck`. A release is cut at the newest `from` commit where `check` is green; `null` cuts at the tip. A repo whose `from` equals `to` has no promotion PR.
 
 ### `repos[].watch`
 
@@ -150,6 +150,7 @@ Verdicts are kept in the store across restarts, and each repo's are in the heart
 | ------------------------ | --------- | ------------------------------------------------------------------------------- |
 | `release.enabled`        | `false`   | Run the release step daily.                                                     |
 | `release.time`           | `"06:00"` | Host-local `HH:MM`.                                                             |
+| `release.readEveryMinutes` | `5`     | How often a repo with `from` ≠ `to` reads its promotion state (the comparison, promotion PRs, `q:promote` issues). Between reads the last answer is used and the release graphs wait. A merge into `from` or `to` forces a read on the next tick. `0` reads every tick. |
 | `reaper.everyMinutes`    | `60`      | Reaper interval; `0` turns it off.                                              |
 | `reaper.staleMinutes`    | `30`      | An untracked agent PR idle this long is examined.                               |
 | `reaper.orphanDays`      | `3`       | A PR naming no issue is closed after this long untouched.                       |
