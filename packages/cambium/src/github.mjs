@@ -32,9 +32,12 @@ import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
  *   updatedAt?: string | null, mergeState?: string | null, autoMergeAt?: string | null,
  *   title?: string, draft?: boolean, queue?: { position: number | null, state: string | null } | null,
  *   additions?: number | null, deletions?: number | null, files?: number | null, counts?: CheckCount[],
+ *   base?: string | null, approvals?: number, codeOwnerRequests?: string[], checkNames?: string[],
  * }} PullRequest
  *   `title`, `draft`, `queue` (its merge-queue entry), the size and `counts` (check runs and statuses by state) are
- *   for canopy's board only (queue-view.mjs).
+ *   for canopy's board only (queue-view.mjs). `base`, `approvals` (latest reviews that approve),
+ *   `codeOwnerRequests` (reviewers still asked for as code owners) and `checkNames` (the checks and statuses on the
+ *   head) let a stalled merge name its blocker (merge-stall.mjs).
  * @typedef {{ state: string, count: number }} CheckCount
  *   `mergeable`: GitHub's conflict check against the base (UNKNOWN while it computes). `mergeState`: GitHub's
  *   `mergeStateStatus` (BLOCKED: a rule holds it, whatever its checks say). `autoMergeAt`: when auto-merge was armed. `reviewDecision`: null
@@ -59,13 +62,21 @@ import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
  *   issues: Map<number, Issue>, prs: PullRequest[], release?: Release | null,
  *   base?: import('./base-health.mjs').BaseHealth,
  *   rateLimit?: { cost: number, remaining: number, resetAt: string } | null, unqueued?: Issue[],
- *   closed?: ClosedPull[],
+ *   closed?: ClosedPull[], armed?: PullRequest[],
  * }} Snapshot
  *   `rateLimit`: the GraphQL budget after the snapshot read (tick.mjs `read` pauses before it runs out).
  *   `unqueued`: open issues in no queue and without a lease, oldest first, at most {@link UNQUEUED}; read while
  *   `intake.adopt` is on, for adoption into `q:intake` (adopt.mjs). Not in `issues`.
  *   `closed`: the newest PRs closed without merging and the issues they would have closed, for the stranded
  *   items on canopy's board (queue-view.mjs).
+ *   `armed`: open PRs that are not cambium's (no `agent/` branch) with auto-merge armed, for the stalled-merge
+ *   warning (merge-stall.mjs). cambium never moves them.
+ * @typedef {{
+ *   requiredChecks: string[], approvals: number, codeOwners: boolean,
+ *   rulesets: { id: number | null, name: string }[],
+ * }} MergeRules
+ *   What the base branch requires, from its rulesets (`/rules/branches/<base>`) and its branch protection when the
+ *   token may read it: the required checks, the approving reviews, a code-owner review, and the rulesets that apply.
  * @typedef {{
  *   number: number, title: string, url: string, branch: string, closedAt: string | null,
  *   closes: { number: number, title: string, url: string, state: string, createdAt: string | null, updatedAt: string | null }[],
@@ -101,7 +112,9 @@ import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
  *   closedPulls(slug: string): Promise<PullRequest[]>,
  *   readIssues(slug: string, numbers: number[]): Promise<Map<number, Issue>>,
  *   workflowRuns(slug: string, workflow: string, branch: string): Promise<import('./watch.mjs').WorkflowRun[]>,
+ *   mergeRules(slug: string, base: string): Promise<MergeRules>,
  * }} GitHub
+ *   `mergeRules`: what `base` requires before a merge ({@link MergeRules}); read only for a PR already stalled.
  *   `workflowRuns`: the newest completed push or schedule runs of `workflow` (file name or id) on `branch`, newest
  *   first (watch.mjs).
  *   `greenCommit`: the newest commit on `ref`'s first-parent line, at most `depth` back, whose `check` concluded
@@ -116,11 +129,13 @@ import { BASE_FIELDS, baseHealthOf } from './base-health.mjs'
  *   an issue is left out.
  */
 
-const PR_FIELDS = `number url title headRefName state headRefOid isDraft isInMergeQueue body mergeable mergeStateStatus reviewDecision createdAt updatedAt
+const PR_FIELDS = `number url title headRefName baseRefName state headRefOid isDraft isInMergeQueue body mergeable mergeStateStatus reviewDecision createdAt updatedAt
   additions deletions changedFiles
   headRef { id }
   autoMergeRequest { enabledAt }
   mergeQueueEntry { position state }
+  latestReviews(first: 20) { nodes { state } }
+  reviewRequests(first: 20) { nodes { asCodeOwner requestedReviewer { __typename ... on User { login } ... on Team { slug } } } }
   closingIssuesReferences(first: 5) { nodes { number } }
   commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 50) {
     checkRunCountsByState { state count }
@@ -366,6 +381,48 @@ export function addIssues(snap, data, asked, botLogin = null) {
   return snap
 }
 
+/** A requested reviewer as GitHub's merge box names it: `@login`, or `team <slug>`. @param {any} r */
+const reviewerName = (r) => (r?.login ? `@${r.login}` : r?.slug ? `team ${r.slug}` : 'a code owner')
+
+/**
+ * What a base requires, from the answers of `/rules/branches/<base>` (rules), the rulesets' own reads (for their
+ * names) and the branch protection (null when unreadable). Pure.
+ * @param {any[]} rules @param {Map<number, string>} names @param {any} protection @returns {MergeRules}
+ */
+export function mergeRulesOf(rules, names, protection) {
+  /** @type {Set<string>} */
+  const checks = new Set()
+  let approvals = 0
+  let codeOwners = false
+  /** @type {Map<number, string>} */
+  const rulesets = new Map()
+  for (const r of rules ?? []) {
+    const p = r?.parameters ?? {}
+    if (r?.type === 'pull_request') {
+      approvals = Math.max(approvals, Number(p.required_approving_review_count ?? 0))
+      codeOwners ||= Boolean(p.require_code_owner_review)
+    }
+    if (r?.type === 'required_status_checks')
+      for (const c of p.required_status_checks ?? []) if (c?.context) checks.add(c.context)
+    if (typeof r?.ruleset_id === 'number')
+      rulesets.set(r.ruleset_id, names.get(r.ruleset_id) ?? `ruleset ${r.ruleset_id}`)
+  }
+  const reviews = protection?.required_pull_request_reviews
+  if (reviews) {
+    approvals = Math.max(approvals, Number(reviews.required_approving_review_count ?? 0))
+    codeOwners ||= Boolean(reviews.require_code_owner_reviews)
+  }
+  const status = protection?.required_status_checks
+  for (const c of [...(status?.contexts ?? []), ...(status?.checks ?? []).map((/** @type {any} */ x) => x?.context)])
+    if (typeof c === 'string') checks.add(c)
+  return {
+    requiredChecks: [...checks],
+    approvals,
+    codeOwners,
+    rulesets: [...rulesets].map(([id, name]) => ({ id, name })),
+  }
+}
+
 /** The `stranding` part of the answer → {@link ClosedPull}s. @param {any[]} nodes @returns {ClosedPull[]} */
 const closedOf = (nodes) =>
   nodes.filter(Boolean).map((p) => ({
@@ -385,7 +442,8 @@ const closedOf = (nodes) =>
   }))
 
 /**
- * GraphQL `data` → {@link Snapshot}. Only `agent/*` PRs are kept.
+ * GraphQL `data` → {@link Snapshot}. Only `agent/*` PRs are kept in `prs`; other open PRs with auto-merge armed go
+ * to `armed`.
  *
  * @param {any} data
  * @param {{ botLogin?: string | null, release?: { from: string, to: string } | null }} [opts]
@@ -404,8 +462,12 @@ export function normalize(data, { botLogin = null, release = null, health = null
   for (const n of [...(repo.issues?.nodes ?? []), ...(repo.awaiting?.nodes ?? [])]) addIssue(n)
   /** @type {PullRequest[]} */
   const prs = []
+  /** @type {PullRequest[]} */
+  const armed = []
   for (const p of [...(repo.open?.nodes ?? []), ...(repo.merged?.nodes ?? [])]) {
-    if (!p?.headRefName?.startsWith('agent/')) continue
+    if (!p?.headRefName) continue
+    const agent = p.headRefName.startsWith('agent/')
+    if (!agent && !(p.state === 'OPEN' && p.autoMergeRequest)) continue
     const rollup = p.commits?.nodes?.[0]?.commit?.statusCheckRollup ?? null
     const failing = (rollup?.contexts?.nodes ?? [])
       .filter((/** @type {any} */ c) => FAILED.has(c.__typename === 'StatusContext' ? c.state : c.conclusion))
@@ -414,7 +476,8 @@ export function normalize(data, { botLogin = null, release = null, health = null
         url: c.detailsUrl ?? c.targetUrl ?? null,
         summary: String(c.title ?? c.description ?? '') + (c.summary ? `\n${String(c.summary).slice(0, 800)}` : ''),
       }))
-    prs.push({
+    const into = agent ? prs : armed
+    into.push({
       number: p.number,
       url: p.url,
       branch: p.headRefName,
@@ -449,6 +512,14 @@ export function normalize(data, { botLogin = null, release = null, health = null
         ...(rollup?.contexts?.checkRunCountsByState ?? []),
         ...(rollup?.contexts?.statusContextCountsByState ?? []),
       ],
+      base: p.baseRefName ?? null,
+      approvals: (p.latestReviews?.nodes ?? []).filter((/** @type {any} */ r) => r?.state === 'APPROVED').length,
+      codeOwnerRequests: (p.reviewRequests?.nodes ?? [])
+        .filter((/** @type {any} */ r) => r?.asCodeOwner)
+        .map((/** @type {any} */ r) => reviewerName(r.requestedReviewer)),
+      checkNames: (rollup?.contexts?.nodes ?? [])
+        .map((/** @type {any} */ c) => c?.name ?? c?.context)
+        .filter((/** @type {any} */ n) => typeof n === 'string'),
     })
   }
   const unqueued = repo.unqueued
@@ -461,6 +532,7 @@ export function normalize(data, { botLogin = null, release = null, health = null
     prs,
     ...(unqueued ? { unqueued } : {}),
     ...(repo.stranding ? { closed: closedOf(repo.stranding.nodes ?? []) } : {}),
+    ...(repo.open ? { armed } : {}),
     ...(release ? { release: normalizeRelease(repo, release, botLogin) } : {}),
     ...(health ? { base: baseHealthOf(repo, health) } : {}),
   }
@@ -725,6 +797,21 @@ export function graftGitHub({ config, exec: run = exec, now = Date.now }) {
           conclusion: String(r.conclusion ?? ''),
           at: r.updated_at ?? r.created_at,
         }))
+    },
+    async mergeRules(slug, base) {
+      const ref = encodeURIComponent(base)
+      const rules = await json(graft(slug, ['api', 'GET', `/repos/${slug}/rules/branches/${ref}`]))
+      const ids = [...new Set((rules ?? []).map((/** @type {any} */ r) => r?.ruleset_id).filter(Number.isInteger))]
+      /** @type {Map<number, string>} */
+      const names = new Map()
+      for (const id of ids) {
+        const set = await json(graft(slug, ['api', 'GET', `/repos/${slug}/rulesets/${id}`])).catch(() => null)
+        if (set?.name) names.set(id, set.name)
+      }
+      // Branch protection needs admin to read; a token without it still has the rulesets.
+      const path = `/repos/${slug}/branches/${ref}/protection`
+      const protection = await json(graft(slug, ['api', 'GET', path])).catch(() => null)
+      return mergeRulesOf(rules, names, protection)
     },
     async linkIssue(slug, pr, issue) {
       const path = `/repos/${slug}/pulls/${pr}`

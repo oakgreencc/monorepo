@@ -18,6 +18,7 @@ All graphs run with `"engine": "graph"`. Steps act once; waits hold until polled
 | Adopt      | An open issue in no queue that cambium has never handled, and no agent PR names, gains `q:intake`. |
 | Schedule   | Starts Task workers by priority then age up to `phases.task.cap`; wakes replied-to issues; starts triage up to `phases.dispatch.cap`. |
 | Release    | [Release graphs](#release-prepare) per repo.                                                          |
+| Stalls     | Warns once about each [stalled](#stalled-merges) PR that is not an agent's.                           |
 | Upkeep     | Reaper, re-triage, then the [rescue](#rescue) sweep.                                                  |
 | Heartbeat  | Writes the [state file](/reference/cambium/heartbeat/).                                               |
 
@@ -65,7 +66,7 @@ One turn per tick for each agent PR (head `agent/*`) closing a cambium-owned iss
 3. A newer open agent PR closes the same issue → `close-pr` (superseded).
 4. Red CI, `mergeable: CONFLICTING` or `CHANGES_REQUESTED` → `rework`.
 5. Green, clean, repo `merge` is `"green"`, nothing armed, no refusal on this head within 10 min → `merge`.
-6. Auto-merge armed, green, and GitHub reports `BLOCKED` `mergeStallMinutes` after arming → `to-human` (`why:approve`, outcome `merge-blocked`).
+6. Auto-merge armed, green, and GitHub reports `BLOCKED` `mergeStallMinutes` after arming → `to-human` (`why:approve`, outcome `merge-blocked`). The reason names the [blocker](#stalled-merges) where it can be read.
 7. Not merged `mergeQueueMinutes` after submission → `to-human` (`why:approve`).
 8. Otherwise nothing this tick.
 
@@ -76,6 +77,24 @@ rework → to-human [reworksSpent] | end
 ```
 
 For an issue in `q:human`, the PR graph only merges a green, clean PR (not on a head a human-only refusal sent there). It never reworks or closes one.
+
+### Stalled merges
+
+A PR is stalled when auto-merge is armed, its checks are green and GitHub reports it `BLOCKED` `mergeStallMinutes` after arming.
+
+| PR                        | Result                                                                                                  |
+| ------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Agent PR                  | `to-human`, as step 6 above.                                                                            |
+| Any other open PR         | One `warn` event and an entry in the heartbeat's `repos[].stalls`. No labels, comments or queue moves. The warning is not repeated while the PR stays stalled; re-arming auto-merge starts it again. |
+
+The reason names what holds the PR, where GitHub exposes it:
+
+- a required check missing from the head's status rollup;
+- a code-owner review still requested;
+- required approving reviews against approvals given;
+- the rulesets that apply to the base (`/rules/branches/<base>`).
+
+The base's rulesets and branch protection are read only once a PR is past the threshold. When nothing can be read, the reason says a rule cambium cannot see holds the PR. `mergeStallMinutes: 0` turns off both checks.
 
 ## dispatch
 
