@@ -277,6 +277,18 @@ color:var(--text);background:color-mix(in srgb,var(--fam,var(--muted)) 32%,var(-
 .fr.err{box-shadow:inset 0 -2px 0 var(--err),inset 0 0 0 1px var(--panel)}
 .fr>span{display:block;padding:0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fl-note{font-size:12px;color:var(--faint);margin-top:var(--s2)}
+.ses{margin-top:var(--s3)}.ses-row{appearance:none;background:none;border:0;border-top:1px solid var(--line);width:100%;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px var(--s3);padding:5px 0;font:inherit;color:inherit;text-align:left;cursor:pointer}
+.ses-row:hover{background:color-mix(in srgb,var(--brand) 7%,transparent)}.ses-row:focus-visible{outline-offset:-2px;border-radius:3px}.ses-row .caret{width:1ch;color:var(--faint)}.ses-row b{font-weight:500;color:var(--strong)}
+.tx{margin:0 0 var(--s3) 1ch;padding-left:var(--s3);border-left:2px solid var(--fam-claude);font-size:13px}
+.tx-e{display:grid;grid-template-columns:52px minmax(0,1fr);gap:var(--s2);padding:3px 0}.tx-e>.at{color:var(--faint);font:11px/20px var(--mono);text-align:right}
+.tx-e.sub>div{border-left:2px dashed var(--line);padding-left:var(--s2)}
+.tx-e .lbl{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);margin-right:6px}
+.tx-e.thinking .body{color:var(--muted);font-style:italic}
+.tx pre{margin:2px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.45 var(--mono);color:var(--text)}
+.tx-tool .nm{font:500 12px var(--mono);color:var(--strong)}.tx-tool .in{color:var(--muted)}
+.tx-tool .out{margin-top:2px;padding:2px 0 2px var(--s2);border-left:2px solid var(--line)}.tx-tool .out.err{border-left-color:var(--err)}.tx-tool .out.err pre{color:var(--err)}
+.tx .md>:first-child{margin-top:0}.tx .md>:last-child{margin-bottom:0}
+.tx-note{color:var(--faint);font-size:12px;padding:var(--s2) 0}
 .attrs{margin:0;padding:var(--s2) 0 var(--s3) var(--s4);display:grid;grid-template-columns:max-content minmax(0,1fr);gap:2px var(--s3);font-size:12px}
 .attrs dt{color:var(--muted)}.attrs dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap}
 /* Intake tab: mycelium's sources. Configured sources are a table whose dots carry each one's state; the rest are a
@@ -1268,7 +1280,7 @@ function spanDetail(sp) {
 }
 const preview = (v) => { const t = String(v).replace(/\\s+/g, ' ').trim(); return t.length > 120 ? t.slice(0, 119) + '…' : t }
 const showValue = (v) => (typeof v === 'string' ? v : JSON.stringify(v))
-let openSpans = new Set(), showQuiet = false, flameKey = ''
+let openSpans = new Set(), showQuiet = false, flameKey = '', openSessions = new Set(), openMore = new Set(), sessionLogs = new Map()
 // Bars are colored by the span name's prefix: which part of the stack did this work.
 const FAMILIES = ['cambium', 'claude', 'mycelium']
 const familyOf = (name) => { const f = String(name).split('.')[0]; return FAMILIES.includes(f) ? f : null }
@@ -1312,12 +1324,107 @@ function traceView(d) {
     const kv = [['service', sp.service], ['status', sp.status + (sp.statusMessage ? ': ' + sp.statusMessage : '')],
       ['started', new Date(sp.start).toISOString()], ['span id', sp.spanId], ...Object.entries(sp.attrs)].filter(([, v]) => v != null)
     for (const e of sp.events) kv.push(['event · ' + e.name, (isFinite(e.at) ? '+' + dur(e.at - sp.start) + ' ' : '') + Object.entries(e.attrs).map(([k, v]) => k + '=' + showValue(v)).join(' ')])
-    return [row, h('dl', { class: 'attrs mono' }, kv.map(([k, v]) => [h('dt', {}, k), h('dd', {}, showValue(v))]))]
+    const sid = sp.name === 'claude.session' ? sp.attrs['claude.session_id'] : null
+    return [row, h('dl', { class: 'attrs mono' }, kv.map(([k, v]) => [h('dt', {}, k), h('dd', {}, showValue(v))]),
+      sid ? [h('dt', {}, 'session log'), h('dd', {}, h('button', { type: 'button', class: 'linkish', 'data-session': sid, 'data-jump': '' }, openSessions.has(sid) ? 'shown under Sessions' : 'read it'))] : null)]
   })
   const note = quiet.length ? h('div', { class: 'quiet-note' },
     h('span', {}, plural(quiet.length, 'permission check', 'permission checks'), ' approved by config or a hook, with nobody asked, ', showQuiet ? 'shown' : 'hidden', '.'),
     h('button', { type: 'button', class: 'linkish', 'data-quiet': '' }, showQuiet ? 'hide them' : 'show them')) : null
-  return h('section', {}, head, flameView(d.spans), h('div', { class: 'wf' }, legend(d.spans), note, axis, rows), traceFileNote(d))
+  return h('section', {}, head, sessionsView(d), flameView(d.spans), h('div', { class: 'wf' }, legend(d.spans), note, axis, rows), traceFileNote(d))
+}
+
+// What each worker did: its session log (prompt, thinking, words, tool calls and their results), read on demand from
+// cambium's worker logs or Claude Code's own transcript.
+function sessionsView(d) {
+  const t = d.summary
+  const byId = new Map(d.spans.map((sp) => [sp.spanId, sp]))
+  // One row per session: a worker's spans emitted again on a later tick repeat its session id.
+  const times = new Map(), first = new Map()
+  for (const sp of d.spans) {
+    const sid = sp.name === 'claude.session' ? sp.attrs['claude.session_id'] : null
+    if (!sid) continue
+    times.set(sid, (times.get(sid) || 0) + 1)
+    if (!first.has(sid) || sp.start < first.get(sid).start) first.set(sid, sp)
+  }
+  const sessions = [...first.values()].sort((a, b) => a.start - b.start)
+  if (!sessions.length) return null
+  const rows = sessions.map((sp) => {
+    const a = sp.attrs, sid = a['claude.session_id'], open = openSessions.has(sid)
+    let up = byId.get(sp.parentSpanId), step = null
+    while (up && !step) { step = up.attrs['cambium.node'] || null; up = byId.get(up.parentSpanId) }
+    const row = h('button', { type: 'button', class: 'ses-row', 'data-session': sid, 'aria-expanded': String(open), id: 'ses-' + sid },
+      h('span', { class: 'caret', 'aria-hidden': 'true' }, open ? '▾' : '▸'),
+      sp.status === 'error' ? h('span', { class: 'dot err' }) : h('span', { class: 'dot ok' }),
+      h('b', {}, step || 'worker'),
+      h('span', { class: 'faint', title: new Date(sp.start).toISOString() }, '+' + dur(sp.start - t.start)),
+      h('span', { class: 'muted' }, dur(sp.end - sp.start)),
+      a['claude.turns'] != null ? h('span', { class: 'muted' }, plural(a['claude.turns'], 'turn', 'turns')) : null,
+      a['claude.cost_usd'] != null ? h('span', { class: 'muted' }, usd(a['claude.cost_usd'])) : null,
+      a['claude.result'] && a['claude.result'] !== 'success' ? h('span', { class: 'pill err' }, a['claude.result']) : null,
+      a['claude.model'] ? h('span', { class: 'faint' }, a['claude.model']) : null,
+      times.get(sid) > 1 ? h('span', { class: 'warn', title: 'cambium traced this worker more than once' }, 'traced ' + times.get(sid) + '×') : null,
+      h('span', { class: 'faint mono', style: 'margin-left:auto' }, sid))
+    return open ? [row, transcriptView(sid, sp.start)] : row
+  })
+  return h('section', { class: 'ses' }, h('h2', {}, 'Sessions', h('span', { class: 'n' }, sessions.length)), rows)
+}
+
+// A long text shows its first lines until asked for the rest.
+function clamp(key, text, lines, render) {
+  const all = String(text).split('\\n'), long = all.length > lines + 2, open = openMore.has(key)
+  const shown = long && !open ? all.slice(0, lines).join('\\n') : String(text)
+  return [render(shown), long ? h('button', { type: 'button', class: 'linkish', 'data-more': key }, open ? 'show less' : 'show all ' + all.length + ' lines') : null]
+}
+
+function transcriptView(sid, t0) {
+  const got = sessionLogs.get(sid)
+  if (!got || got.loading) return h('div', { class: 'tx' }, h('div', { class: 'tx-note' }, 'reading the session log…'))
+  if (got.error) return h('div', { class: 'tx' }, h('div', { class: 'tx-note err' }, "Can't read the session log: " + got.error))
+  const d = got.data
+  if (d.status !== 'ok') return h('div', { class: 'tx' }, h('div', { class: 'tx-note' }, d.message))
+  const md = (src) => h('div', { class: 'md' }, markdown(src, h, {}))
+  const pre = (x) => h('pre', {}, x)
+  const at = (ms) => h('span', { class: 'at' }, ms == null ? '' : '+' + dur(Math.max(0, ms - t0)))
+  const row = (e, cls, ...kids) => h('div', { class: 'tx-e ' + cls + (e.sub ? ' sub' : '') }, at(e.at), h('div', {}, ...kids))
+  const items = d.entries.map((e, i) => {
+    const k = sid + ':' + i
+    if (e.kind === 'prompt') return row(e, 'prompt', h('span', { class: 'lbl' }, 'prompt'), clamp(k, e.text, 8, pre))
+    if (e.kind === 'user') return row(e, 'user', h('span', { class: 'lbl' }, e.sub ? 'to subagent' : 'user'), clamp(k, e.text, 8, pre))
+    if (e.kind === 'thinking') return row(e, 'thinking', h('span', { class: 'lbl' }, 'thinking'), h('div', { class: 'body' }, clamp(k, e.text, 12, md)))
+    if (e.kind === 'text') return row(e, 'text', clamp(k, e.text, 30, md))
+    if (e.kind === 'tool') return row(e, 'tx-tool',
+      h('span', { class: 'nm' }, e.name), e.result === null ? h('span', { class: 'pill warn', style: 'margin-left:6px' }, 'no result') : null,
+      e.input ? h('div', { class: 'in' }, clamp(k + ':in', e.input, 6, pre)) : null,
+      e.result !== null ? h('div', { class: 'out' + (e.error ? ' err' : '') }, e.result ? clamp(k + ':out', e.result, 4, pre) : h('span', { class: 'faint' }, '(empty)')) : null)
+    if (e.kind === 'result') return row(e, 'result', h('span', { class: 'pill ' + (e.error ? 'err' : 'ok') }, e.subtype),
+      e.turns != null ? h('span', { class: 'muted' }, ' ' + plural(e.turns, 'turn', 'turns')) : null,
+      e.costUsd != null ? h('span', { class: 'muted' }, ' · ' + usd(e.costUsd)) : null,
+      e.text ? clamp(k, e.text, 20, md) : null)
+    return null
+  })
+  return h('div', { class: 'tx' },
+    items.length ? items : h('div', { class: 'tx-note' }, 'The log has nothing the worker said or did.'),
+    h('div', { class: 'tx-note mono' }, 'from ', d.path, d.source === 'claude' ? " (Claude Code's transcript; cambium's copy has rotated away)" : '',
+      d.malformed ? ' · ' + plural(d.malformed, 'line', 'lines') + " couldn't be parsed" : ''))
+}
+
+async function openSession(sid) {
+  if (openSessions.has(sid)) { openSessions.delete(sid); return }
+  openSessions.add(sid)
+  const got = sessionLogs.get(sid)
+  if (got && !got.error) return
+  const trace = traceSel
+  sessionLogs.set(sid, { loading: true })
+  if (last) render(last)
+  try {
+    const r = await fetch('/api/traces/' + trace + '/sessions/' + sid, { cache: 'no-store' })
+    const j = await r.json()
+    if (trace !== traceSel) return
+    sessionLogs.set(sid, r.ok ? { data: j } : { error: j.error || 'HTTP ' + r.status })
+  } catch (err) {
+    sessionLogs.set(sid, { error: (err && err.message) || 'no answer' })
+  }
 }
 
 // A permission check a person answered, or one that was refused, is the one worth seeing.
@@ -1974,7 +2081,7 @@ $('tabs').addEventListener('keydown', (e) => {
   e.preventDefault()
   go(TABS[(TABS.indexOf(tab) + step + TABS.length) % TABS.length], true)
 })
-$('main').addEventListener('click', (e) => {
+$('main').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-go]')
   if (b) return go(b.dataset.go, true)
   const gb = e.target.closest('[data-graph],[data-gx-drawer],[data-gx-close],[data-gx-play],#gx-tl,.g-node')
@@ -2023,6 +2130,23 @@ $('main').addEventListener('click', (e) => {
     flameKey = fr.dataset.frame
     if (last) render(last)
     return document.querySelector('.fr[data-frame="' + CSS.escape(flameKey) + '"],.crumbs [data-frame="' + CSS.escape(flameKey) + '"]')?.focus({ preventScroll: true })
+  }
+  const more = e.target.closest('[data-more]')
+  if (more) {
+    const k = more.dataset.more
+    openMore.has(k) ? openMore.delete(k) : openMore.add(k)
+    if (last) render(last)
+    return document.querySelector('[data-more="' + CSS.escape(k) + '"]')?.focus({ preventScroll: true })
+  }
+  const ses = e.target.closest('[data-session]')
+  if (ses) {
+    const sid = ses.dataset.session, jump = ses.dataset.jump != null
+    if (jump && openSessions.has(sid)) return $('ses-' + sid)?.scrollIntoView({ block: 'start' })
+    await openSession(sid)
+    if (last) render(last)
+    const el = $('ses-' + sid)
+    if (jump) el?.scrollIntoView({ block: 'start' })
+    return el?.focus({ preventScroll: true })
   }
   if (e.target.closest('[data-quiet]')) {
     showQuiet = !showQuiet
@@ -2084,12 +2208,18 @@ addEventListener('hashchange', async () => {
   ;[tab, traceSel, sel, graph] = parseHash()
   if (sel) { ibSel = sel; ibOpen = true }
   if (graph && graph !== gxSel) { gxSel = graph; gxPin = null }
-  if (traceSel !== before) { openSpans = new Set(); flameKey = ''; window.scrollTo(0, 0) }
+  if (traceSel !== before) { openSpans = new Set(); flameKey = ''; openSessions = new Set(); openMore = new Set(); sessionLogs = new Map(); window.scrollTo(0, 0) }
   if (last) render(last)
   await loadTraces()
   if (last) render(last)
 })
 
+let lastTraceSig = null
+const traceSig = () => {
+  const d = traceState && traceState.data
+  return JSON.stringify([traceState && traceState.key, traceState && traceState.error, d && d.summary && [d.summary.spans, d.summary.end],
+    [...openSpans], showQuiet, flameKey, [...openSessions], [...openMore], [...sessionLogs].map(([k, v]) => [k, !!v.loading, !!v.error])])
+}
 function render(s) {
   last = s
   traceIdx = (s.traces && s.traces.byIssue) || {}
@@ -2126,7 +2256,10 @@ function render(s) {
     const gxEl = $('gx')
     for (const c of [...$('main').children]) if (c !== gxEl) c.remove()
     gxEl.before(...body.filter((x) => x !== gxEl))
+  } else if (tab === 'traces' && traceSel && traceSig() === lastTraceSig && $('main').querySelector('.trace-head') && !$('down')) {
+    // An unchanged trace stays as it is, so reading or selecting in a session log survives the poll.
   } else {
+    lastTraceSig = tab === 'traces' && traceSel ? traceSig() : null
     $('main').replaceChildren(...body)
     const p = $('ib-pane')
     if (p && paneWas && p.dataset.key === paneWas.key) {
