@@ -17,6 +17,10 @@
  * nothing on the base, so it carries no policy — and it is the first step of
  * the red-base rescue, so it must stay reachable while the line is stopped.
  *
+ * A merge run from inside the PR's own worktree finishes that worktree right
+ * away (`graft worktree done`), so `ExitWorktree remove` passes afterwards
+ * (src/cli/worktree.mjs `finishAfterMerge` explains why the hook is too late).
+ *
  * Opening a PR is `graft publish … --pr "<title>"`: a PR without a commit is
  * nothing.
  */
@@ -29,6 +33,7 @@ import { baseHealth, mergeVerdict, rescueFacts } from '../pr-policy.mjs'
 import { keyDiffers, policyFrom, snapshot } from '../protected.mjs'
 import { PublishError } from '../errors.mjs'
 import { COMMON_VALUE_FLAGS, contextFrom } from './common.mjs'
+import { finishAfterMerge } from './worktree.mjs'
 
 const USAGE = `usage: graft pr merge <n> [--method merge|squash|rebase] [--auto] [--repo <owner/repo>]
        graft pr update <n> [--repo <owner/repo>]`
@@ -180,4 +185,12 @@ export async function run(argv, { client: given } = {}) {
     sha: pr.head.sha,
   })
   console.log(`merged ${full}#${number} into ${base}: ${merged.sha?.slice(0, 7) ?? '?'} (${method})`)
+  await finishAfterMerge({
+    git: ctx.git,
+    root: ctx.root ?? null,
+    headSha: pr.head.sha,
+    branch: pr.head.ref,
+    argv,
+    client,
+  })
 }

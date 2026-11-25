@@ -21,6 +21,11 @@
  *   ExitWorktree would refuse anyway, with only a count.
  * - Anything else (no network, no App, an older repo) has no opinion: the call
  *   goes through and ExitWorktree's own guard still applies.
+ *
+ * Only a backstop. ExitWorktree counts commits while it validates its input,
+ * which happens before PreToolUse hooks run, so a branch with commits is
+ * refused before this hook runs. The rewind that matters happens at merge time
+ * (src/cli/worktree.mjs `finishAfterMerge`, called by `graft pr merge`).
  */
 import { run as worktree } from '../cli/worktree.mjs'
 

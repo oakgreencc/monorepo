@@ -12,7 +12,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { run as cli } from '../src/cli/worktree.mjs'
+import { run as cli, finishAfterMerge } from '../src/cli/worktree.mjs'
 import { finish } from '../src/hooks/finish-worktree.mjs'
 import { sync } from '../src/hooks/sync-worktree.mjs'
 import { advance, publishWorktree, resolveBranch } from '../src/publish/publish.mjs'
@@ -358,4 +358,76 @@ test('finish-worktree: no opinion on keep, an explicit discard, no cwd, or when 
     throw new Error('main checkout')
   }
   assert.equal(await finish(exitEvent('/w'), { done: throws }), null)
+})
+
+test('pr merge finishes its own worktree: rewound before ExitWorktree is ever called', async () => {
+  const s = await enteredPublishedMerged()
+  try {
+    writeFileSync(join(s.lwt, '.graft.json'), JSON.stringify({ baseBranch: 'develop' }))
+    writeFileSync(join(s.wt, '.git', 'info', 'exclude'), '.graft.json\n')
+    assert.ok(exitWorktreeCounts(s).commits >= 2)
+    const head = run(s.lwt, ['rev-parse', 'HEAD']).trim()
+    const lines = /** @type {string[]} */ ([])
+    const out = await finishAfterMerge({
+      git: s.lgit,
+      root: s.lwt,
+      headSha: head,
+      branch: 'agent/x',
+      argv: ['merge', '7', '--repo', 'o/r'],
+      client: s.client,
+      say: (l) => lines.push(l),
+    })
+    assert.equal(out, 'finished', lines.join('\n'))
+    assert.deepEqual(exitWorktreeCounts(s), { commits: 0, changed: '' })
+  } finally {
+    s.cleanup()
+  }
+})
+
+test('pr merge leaves alone: the main checkout, a worktree on another head, no repository', async () => {
+  const s = await enteredPublishedMerged()
+  try {
+    let ran = 0
+    const done = async () => {
+      ran++
+      return 0
+    }
+    const head = run(s.lwt, ['rev-parse', 'HEAD']).trim()
+    const say = () => {}
+    const main = { git: gitIn(s.wt), root: s.wt, headSha: run(s.wt, ['rev-parse', 'HEAD']).trim() }
+    assert.equal(await finishAfterMerge({ ...main, branch: 'agent/x', done, say }), 'skipped')
+    assert.equal(
+      await finishAfterMerge({ git: s.lgit, root: s.lwt, headSha: 'f'.repeat(40), branch: 'agent/x', done, say }),
+      'skipped',
+    )
+    assert.equal(
+      await finishAfterMerge({ git: s.lgit, root: null, headSha: head, branch: 'agent/x', done, say }),
+      'skipped',
+    )
+    assert.equal(ran, 0)
+  } finally {
+    s.cleanup()
+  }
+})
+
+test('pr merge: a done that refuses or throws is reported, never thrown', async () => {
+  const s = await enteredPublishedMerged()
+  try {
+    const head = run(s.lwt, ['rev-parse', 'HEAD']).trim()
+    for (const done of [async () => 1, async () => Promise.reject(new Error('offline'))]) {
+      const lines = /** @type {string[]} */ ([])
+      const out = await finishAfterMerge({
+        git: s.lgit,
+        root: s.lwt,
+        headSha: head,
+        branch: 'agent/x',
+        done,
+        say: (l) => lines.push(l),
+      })
+      assert.equal(out, 'failed')
+      assert.match(lines.join('\n'), /run `graft worktree done agent\/x`/)
+    }
+  } finally {
+    s.cleanup()
+  }
 })

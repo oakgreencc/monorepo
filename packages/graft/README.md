@@ -48,19 +48,19 @@ Full walkthrough: [skills/graft/references/setup.md](skills/graft/references/set
 
 ## Pieces
 
-|                                           |                                                                                                                                 |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `bin/graft.mjs`                           | the CLI; `graft help`                                                                                                           |
-| `skills/graft/`                           | the agent skill (also installable as a Claude Code plugin from this repo)                                                       |
-| `src/publish/`                            | the primitive: tree build, blob shipping, signed commit, fast-forward ref, safe advance                                         |
-| `src/gates/`                              | scope, payload, displacement, validated base, version                                                                           |
-| `src/git-hooks.mjs`                       | runs the repository's git hooks during a publish                                                                                |
-| `src/codeowners.mjs`, `src/protected.mjs` | CODEOWNERS parsed with GitHub's semantics → the protection policy                                                               |
-| `src/maintainer.mjs`                      | scoped, session-bound grants in `.git/graft/`                                                                                   |
-| `src/github/`                             | the App client; issue reads/writes (`graft issue`); check verdicts (`graft ci wait`)                                            |
-| `src/hooks/`                              | Claude Code hooks: credential guard, protected-path guard, PR-write guard, worktree sync                                        |
-| `src/status.mjs`, `src/worktree.mjs`      | `graft status`, and `graft worktree done`: rewind a merged worktree so ExitWorktree passes (the `finish-worktree` hook runs it) |
-| `src/setup/`                              | `graft setup` (App manifest flow, project bootstrap) and `graft doctor`                                                         |
+|                                           |                                                                                                                                                |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bin/graft.mjs`                           | the CLI; `graft help`                                                                                                                          |
+| `skills/graft/`                           | the agent skill (also installable as a Claude Code plugin from this repo)                                                                      |
+| `src/publish/`                            | the primitive: tree build, blob shipping, signed commit, fast-forward ref, safe advance                                                        |
+| `src/gates/`                              | scope, payload, displacement, validated base, version                                                                                          |
+| `src/git-hooks.mjs`                       | runs the repository's git hooks during a publish                                                                                               |
+| `src/codeowners.mjs`, `src/protected.mjs` | CODEOWNERS parsed with GitHub's semantics → the protection policy                                                                              |
+| `src/maintainer.mjs`                      | scoped, session-bound grants in `.git/graft/`                                                                                                  |
+| `src/github/`                             | the App client; issue reads/writes (`graft issue`); check verdicts (`graft ci wait`)                                                           |
+| `src/hooks/`                              | Claude Code hooks: credential guard, protected-path guard, PR-write guard, worktree sync                                                       |
+| `src/status.mjs`, `src/worktree.mjs`      | `graft status`, and `graft worktree done`: rewind a merged worktree so ExitWorktree passes (`graft pr merge` runs it in the PR's own worktree) |
+| `src/setup/`                              | `graft setup` (App manifest flow, project bootstrap) and `graft doctor`                                                                        |
 
 Design notes: [docs/design.md](docs/design.md). The one invariant everything rests on: [docs/verified-commits.md](docs/verified-commits.md).
 
