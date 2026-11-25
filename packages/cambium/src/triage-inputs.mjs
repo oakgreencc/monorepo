@@ -3,8 +3,8 @@
  * Triage inputs: what a triage verdict was drawn from, hashed, so the stalled-queue fallback (stall.mjs) re-triages
  * a `q:human` issue only when something changed on it since triage answered needs-human.
  *
- * The fingerprint covers the issue's title and body, its labels (not cambium's own: `q:*`, `why:*`, `wait:*`,
- * `running`), the ids of its human comments (human-reply.mjs: not cambium, not a bot, not a state marker; or an
+ * The fingerprint covers the issue's title and body, its labels (not cambium's own: `q:*`, `why:*`, `ask:*`,
+ * `wait:*`, `running`), the ids of its human comments (human-reply.mjs: not cambium, not a bot, not a state marker; or an
  * answer comment, whoever wrote it), its
  * GitHub `blockedBy` issues and their states, the agent PRs that name it and their states, and
  * {@link TRIAGE_RUBRIC}. `start-triage` records it on the marker (the inputs the worker saw), and `to-human` keeps
@@ -29,8 +29,12 @@ import { RUNNING } from './labels.mjs'
  */
 export const TRIAGE_RUBRIC = 2
 
-/** cambium's own labels: moving an issue between queues is not a change triage should see. @param {string} l */
-const cambiumLabel = (l) => l === RUNNING || /^(q|why|wait):/.test(l)
+/**
+ * cambium's own labels: moving an issue between queues is not a change triage should see. `ask:*` above all: the
+ * move into `q:intake` drops it before `start-triage` takes the fingerprint and a needs-human verdict sets it again,
+ * so counting it would make every such verdict look changed by the next tick. @param {string} l
+ */
+const cambiumLabel = (l) => l === RUNNING || /^(q|why|ask|wait):/.test(l)
 
 /**
  * The inputs, in a stable order. @param {Issue} issue @param {Snapshot | undefined} snap

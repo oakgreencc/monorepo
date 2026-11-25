@@ -167,6 +167,27 @@ test('fingerprint: cambium labels do not count; the title does', () => {
   assert.notEqual(fingerprintOf({ ...issue, title: 'u' }, snap), a)
 })
 
+test('retriageDecision: the ask label a needs-human verdict sets is not a change', () => {
+  // start-triage fingerprints the issue in q:intake, where the move has dropped its ask:* label; the verdict puts
+  // it back with q:human and why:triage. The stall fallback must read that as unchanged, or it re-triages forever.
+  const intake = /** @type {any} */ ({
+    number: 1,
+    title: 't',
+    body: 'b',
+    labels: ['q:intake', 'running', 'chore'],
+    blockedBy: [],
+    comments: [],
+  })
+  const snap = /** @type {any} */ ({ issues: new Map([[1, intake]]), prs: [] })
+  const hash = fingerprintOf(intake, snap)
+  const human = {
+    ...intake,
+    labels: ['q:human', 'why:triage', 'ask:chore', 'chore'],
+    stateComment: { marker: { fingerprint: { hash, at: '2026-01-01T00:00:00.000Z' } } },
+  }
+  assert.deepEqual(retriageDecision(human, snap), { retriage: false, why: 'unchanged' })
+})
+
 test('retriageDecision: a linked PR merged since the verdict is a change; no fingerprint is no re-triage', () => {
   const issue = /** @type {any} */ ({
     number: 70,

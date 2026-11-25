@@ -297,7 +297,7 @@ Then the `q:human` issues involved (a cycle's members, a chain's end, what starv
 When triage answers needs-human, the marker keeps a fingerprint of what triage saw:
 
 - title and body
-- labels, except `q:*`, `why:*`, `wait:*` and `running`
+- labels, except `q:*`, `why:*`, `ask:*`, `wait:*` and `running`
 - human comments (not `graft.botLogin`, not a bot)
 - GitHub "blocked by" issues and their states
 - agent PRs naming the issue and their states
