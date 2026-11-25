@@ -2,15 +2,39 @@
 /** `oakgreen update` with a fake registry, npm and launchd; nothing leaves the process. */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { globalTools, installOf, latestManifest, newer, staleTools, toolVersions } from '../src/update.mjs'
+import {
+  REGISTRY_WAITS,
+  globalTools,
+  installOf,
+  latestManifest,
+  missingOnRegistry,
+  neededSpecs,
+  newer,
+  staleTools,
+  toolVersions,
+} from '../src/update.mjs'
 import { run, tempDir } from './helpers.mjs'
 
 /**
- * @param {{ latest?: string, current?: string, global?: boolean, fail?: string,
- *   pins?: Record<string, string>, tools?: Record<string, string> }} [o]
+ * @param {{ latest?: string, current?: string, global?: boolean, fail?: string | string[],
+ *   pins?: Record<string, string>, tools?: Record<string, string>, absent?: string[][], doctorCode?: number }} [o]
+ *   `fail`: one message for every install, or one per attempt (then success); `absent`: what the registry lacks on
+ *   each successive look (then nothing)
  */
-function fakeUpdater({ latest = '0.1.0', current = '0.0.31', global = true, fail, pins = {}, tools = {} } = {}) {
+function fakeUpdater({
+  latest = '0.1.0',
+  current = '0.0.31',
+  global = true,
+  fail,
+  pins = {},
+  tools = {},
+  absent = [],
+  doctorCode = 0,
+} = {}) {
   const installs = /** @type {{ prefix: string, specs: string[] }[]} */ ([])
+  const looks = /** @type {string[][]} */ ([])
+  const fails = Array.isArray(fail) ? [...fail] : null
+  let doctors = 0
   const version = () => (installs.length ? 'new' : 'old')
   /** @type {import('../src/update.mjs').Updater} */
   const updater = {
@@ -19,12 +43,21 @@ function fakeUpdater({ latest = '0.1.0', current = '0.0.31', global = true, fail
     latest: async () => ({ version: latest, dependencies: pins }),
     globals: () => tools,
     install: async (prefix, specs) => {
-      if (fail) throw new Error(fail)
+      const f = fails ? fails.shift() : fail
+      if (f) throw new Error(f)
       installs.push({ prefix, specs })
     },
     versions: () => ({ oakgreen: `${version()}-o`, graft: `${version()}-g`, cambium: `${version()}-c`, canker: null }),
+    missing: async (specs) => {
+      looks.push(specs)
+      return (absent[looks.length - 1] ?? []).filter((s) => specs.includes(s))
+    },
+    doctor: async () => {
+      doctors++
+      return doctorCode
+    },
   }
-  return { updater, installs }
+  return { updater, installs, looks, doctors: () => doctors }
 }
 
 /** launchctl where `running` agents have a pid and a TERM gives them a new one. @param {string[]} running */
@@ -160,6 +193,105 @@ test('off macOS: installs, skips services', async () => {
   assert.equal(r.code, 0)
   assert.equal(installs.length, 1)
   assert.deepEqual(lc.calls, [])
+})
+
+test('every update ends with the installed oakgreen doctor; --check and a failed install do not', async () => {
+  const upToDate = fakeUpdater({ latest: '0.0.31' })
+  let r = await run(['update'], ports({ updater: upToDate.updater, exec: fakeLaunchctl([]).exec }))
+  assert.equal(upToDate.doctors(), 1)
+  assert.match(r.out, /oakgreen doctor\n/)
+
+  const updated = fakeUpdater()
+  r = await run(['update'], ports({ updater: updated.updater, exec: fakeLaunchctl(['cambium']).exec }))
+  assert.equal(updated.doctors(), 1)
+  assert.ok(r.out.indexOf('restarted') < r.out.indexOf('oakgreen doctor'), 'doctor runs after the restarts')
+
+  const checked = fakeUpdater()
+  await run(['update', '--check'], ports({ updater: checked.updater, exec: fakeLaunchctl([]).exec }))
+  assert.equal(checked.doctors(), 0)
+
+  const failed = fakeUpdater({ fail: 'EACCES' })
+  await run(['update'], ports({ updater: failed.updater, exec: fakeLaunchctl([]).exec }))
+  assert.equal(failed.doctors(), 0)
+})
+
+test('doctor finding problems is reported but the update still exits 0', async () => {
+  const { updater } = fakeUpdater({ doctorCode: 1 })
+  const r = await run(['update'], ports({ updater, exec: fakeLaunchctl([]).exec }))
+  assert.equal(r.code, 0, r.err)
+  assert.match(r.out, /oakgreen setup/)
+})
+
+test('a pinned tool the registry does not serve yet: waits, then installs once it is there', async () => {
+  const slept = /** @type {number[]} */ ([])
+  const { updater, installs, looks } = fakeUpdater({
+    pins: { '@oakgreencc/cambium': '0.0.45', '@oakgreencc/graft': 'workspace:*' },
+    absent: [['@oakgreencc/cambium@0.0.45'], ['@oakgreencc/cambium@0.0.45']],
+  })
+  const r = await run(
+    ['update'],
+    ports({ updater, exec: fakeLaunchctl([]).exec, sleep: async (/** @type {number} */ ms) => slept.push(ms) }),
+  )
+  assert.equal(r.code, 0, r.err)
+  assert.deepEqual(looks[0], ['oakgreen@0.1.0', '@oakgreencc/cambium@0.0.45'])
+  assert.equal(looks.length, 3)
+  assert.deepEqual(slept, [REGISTRY_WAITS[0] * 1000, REGISTRY_WAITS[1] * 1000])
+  assert.match(r.out, /registry does not serve @oakgreencc\/cambium@0\.0\.45 yet; looking again in 10s/)
+  assert.deepEqual(installs, [{ prefix: '/opt/homebrew', specs: ['oakgreen@0.1.0'] }])
+})
+
+test('still missing after every wait: exits 1, installs and restarts nothing', async () => {
+  const { updater, installs, doctors } = fakeUpdater({
+    pins: { '@oakgreencc/cambium': '0.0.45' },
+    absent: Array(REGISTRY_WAITS.length + 1).fill(['@oakgreencc/cambium@0.0.45']),
+  })
+  const lc = fakeLaunchctl(['cambium'])
+  const r = await run(['update'], ports({ updater, exec: lc.exec }))
+  assert.equal(r.code, 1)
+  assert.match(r.err, /does not serve @oakgreencc\/cambium@0\.0\.45 yet.*nothing was installed/)
+  assert.deepEqual(installs, [])
+  assert.equal(lc.calls.filter((c) => c[1] === 'kill').length, 0)
+  assert.equal(doctors(), 0)
+})
+
+test('npm ETARGET is retried; other npm failures are not', async () => {
+  const lag = fakeUpdater({ fail: ['npm install failed: npm error code ETARGET No matching version found'] })
+  let r = await run(['update'], ports({ updater: lag.updater, exec: fakeLaunchctl([]).exec }))
+  assert.equal(r.code, 0, r.err)
+  assert.match(r.out, /npm cannot find a version yet/)
+  assert.equal(lag.installs.length, 1)
+
+  const perm = fakeUpdater({ fail: ['npm install failed: EACCES', ''] })
+  r = await run(['update'], ports({ updater: perm.updater, exec: fakeLaunchctl([]).exec }))
+  assert.equal(r.code, 1)
+  assert.equal(perm.installs.length, 0)
+})
+
+test("neededSpecs adds oakgreen's exact pins only when oakgreen is installed", () => {
+  const latest = { version: '0.1.0', dependencies: { '@oakgreencc/a': '1.0.0', '@oakgreencc/b': '^1.0.0' } }
+  assert.deepEqual(neededSpecs(['oakgreen@0.1.0', '@oakgreencc/c@2.0.0'], latest), [
+    'oakgreen@0.1.0',
+    '@oakgreencc/c@2.0.0',
+    '@oakgreencc/a@1.0.0',
+  ])
+  assert.deepEqual(neededSpecs(['@oakgreencc/c@2.0.0'], latest), ['@oakgreencc/c@2.0.0'])
+})
+
+test('missingOnRegistry: only a 404 is missing', async () => {
+  /** @type {string[]} */
+  const urls = []
+  const fetch = /** @type {any} */ (
+    async (/** @type {string} */ url) => {
+      urls.push(url)
+      if (url.includes('boom')) throw new Error('offline')
+      return { status: url.endsWith('/0.0.45') ? 404 : url.includes('flaky') ? 503 : 200 }
+    }
+  )
+  assert.deepEqual(
+    await missingOnRegistry(['@oakgreencc/cambium@0.0.45', 'oakgreen@0.1.0', 'flaky@1.0.0', 'boom@1.0.0'], { fetch }),
+    ['@oakgreencc/cambium@0.0.45'],
+  )
+  assert.equal(urls[0], 'https://registry.npmjs.org/@oakgreencc%2fcambium/0.0.45')
 })
 
 test('unknown argument is a usage error', async () => {

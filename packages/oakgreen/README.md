@@ -28,7 +28,7 @@ oakgreen update                      # latest oakgreen and its tools, then resta
 | `oakgreen stop [service...]`                                | Disable and unload each, in reverse order; it stays stopped across logins until `start`.                       |
 | `oakgreen restart [service...]`                             | A new process for each (all installed ones by default), on the same agent definition.                          |
 | `oakgreen reload [service...]`                              | Re-read each agent's plist too (its env, its program), then start it.                                          |
-| `oakgreen update [--check]`                                 | Install the latest oakgreen and its tools, restart running services. See [Update](#update).                    |
+| `oakgreen update [--check]`                                 | Install the latest oakgreen and its tools, restart running services, run doctor. See [Update](#update).        |
 | `oakgreen proxy [--port n]`                                 | Serve `http://<name>.localhost/` for the stack's web UIs. See [Proxy](#proxy).                                 |
 | `oakgreen proxy install [--port n] [--dry-run]`             | Write the proxy's launchd agent (`oakgreen start` does this the first time).                                   |
 
@@ -84,6 +84,8 @@ oakgreen depends on every tool, so updating it updates the stack. It updates its
 
 - **`oakgreen update --check`** only reports: up to date, or `a → b available`.
 - **`oakgreen update`** runs `npm install --global --prefix <prefix> oakgreen@<latest>`, then (macOS) restarts each service that is running, as `oakgreen restart` does; a stopped one stays stopped. Exit 1 if the install or a restart fails.
+- If the registry does not serve a version the install needs yet (a release can take a few minutes to reach it), `oakgreen update` waits and looks again for about four minutes, then gives up with nothing installed. npm runs with `--prefer-online`; an npm `ETARGET` is retried the same way.
+- Every `oakgreen update` (not `--check`) ends with the installed oakgreen's `oakgreen doctor`, so you see config the new version wants changed. Its result does not change the exit code.
 - Every run lists versions (`versions:`): oakgreen (also the proxy service), then graft, canker, deadwood, cambium, mycelium and canopy, each from its standalone global copy if there is one, else the copy bundled with oakgreen. After an install these are the new versions. otelcol is not an oakgreen package and is not listed.
 - cambium's own `cambium update` / `update.auto` cover a separately installed `@oakgreencc/cambium`.
 

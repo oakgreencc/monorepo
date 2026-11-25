@@ -12,6 +12,15 @@
  * It updates only a global npm install (`<prefix>/lib/node_modules/oakgreen`), into that same prefix, so PATH and the
  * launchd agents' paths stay valid. A source checkout or `npm link` is left alone. Afterwards each service that is
  * running gets a new process (SIGTERM; KeepAlive starts it on the new code); a stopped one stays stopped.
+ *
+ * A release publishes oakgreen and its tools together, but the registry's CDN can serve oakgreen's new manifest
+ * before a tool version it pins, and npm then fails with ETARGET. So before installing, every exact version the install
+ * needs is looked up on the registry; while one is missing it waits and looks again ({@link REGISTRY_WAITS}), and if it
+ * is still missing it stops before touching the install. npm runs with `--prefer-online` so its own packument cache
+ * cannot hide a version the registry already has, and a "no such version" from npm is retried on the same schedule.
+ *
+ * Every update (not `--check`) ends with the installed oakgreen's `oakgreen doctor`, run as a new process so it is
+ * the new version's checks, to show config the new version wants changed. Its result does not change the exit code.
  */
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -26,6 +35,12 @@ export const SCOPE = '@oakgreencc'
 
 const PKG_DIR = fileURLToPath(new URL('..', import.meta.url))
 
+/** Seconds to wait before each new look at the registry for a version it does not serve yet (~4 minutes in all). */
+export const REGISTRY_WAITS = [10, 20, 30, 60, 60, 60]
+
+/** npm's error when the registry does not (yet) have a version. */
+const NOT_ON_REGISTRY = /ETARGET|E404|notarget|No matching version/i
+
 /**
  * @typedef {{
  *   current: string,
@@ -34,6 +49,8 @@ const PKG_DIR = fileURLToPath(new URL('..', import.meta.url))
  *   globals: (prefix: string) => Record<string, string>,
  *   install: (prefix: string, specs: string[]) => Promise<void>,
  *   versions: () => Record<string, string | null>,
+ *   missing: (specs: string[]) => Promise<string[]>,
+ *   doctor: () => Promise<number>,
  * }} Updater
  * @typedef {{ version: string, dependencies: Record<string, string> }} Manifest
  * @typedef {{ name: string, from: string, to: string }} Stale
@@ -62,6 +79,9 @@ export function newer(a, b) {
   }
   return false
 }
+
+/** @param {number} ms */
+const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const SEMVER = /^\d+\.\d+\.\d+/
 
@@ -156,6 +176,51 @@ export function versionLines(v) {
   return Object.entries(v).map(([name, ver]) => `  ${name.padEnd(8)} ${ver ?? 'not installed'}\n`)
 }
 
+/** `name@x.y.z` → `[name, version]`. @param {string} spec */
+const splitSpec = (spec) => {
+  const at = spec.lastIndexOf('@')
+  return /** @type {[string, string]} */ ([spec.slice(0, at), spec.slice(at + 1)])
+}
+
+/**
+ * The `name@version` specs the registry does not serve (404). Any other answer counts as served, so a registry
+ * hiccup is left to npm to report.
+ * @param {string[]} specs
+ * @param {{ fetch?: typeof globalThis.fetch, registry?: string }} [o]
+ * @returns {Promise<string[]>}
+ */
+export async function missingOnRegistry(specs, { fetch = globalThis.fetch, registry = REGISTRY } = {}) {
+  const found = await Promise.all(
+    specs.map(async (spec) => {
+      const [name, version] = splitSpec(spec)
+      try {
+        const res = await fetch(`${registry}/${name.replace('/', '%2f')}/${version}`, {
+          headers: { accept: 'application/json' },
+          cache: 'no-store',
+        })
+        return res.status !== 404
+      } catch {
+        return true
+      }
+    }),
+  )
+  return specs.filter((_, i) => !found[i])
+}
+
+/**
+ * Every exact version an install of `specs` pulls from the registry: the specs, plus oakgreen's exact-pinned tools
+ * when oakgreen is one of them.
+ * @param {string[]} specs
+ * @param {Manifest} latest
+ */
+export function neededSpecs(specs, latest) {
+  const out = new Set(specs)
+  if (specs.includes(`${PACKAGE}@${latest.version}`))
+    for (const [name, v] of Object.entries(latest.dependencies))
+      if (/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(v)) out.add(`${name}@${v}`)
+  return [...out]
+}
+
 /** npm next to this Node (nvm, Homebrew and the official installer put it there), else npm on PATH. */
 export function npmBin(node = process.execPath) {
   const beside = join(dirname(node), 'npm')
@@ -164,20 +229,25 @@ export function npmBin(node = process.execPath) {
 
 /**
  * The real updater.
- * @param {{ exec: import('./tools.mjs').Exec, current: string, fetch?: typeof globalThis.fetch }} o
+ * @param {{ exec: import('./tools.mjs').Exec, spawn: import('./tools.mjs').Spawn, cwd: string, current: string,
+ *   fetch?: typeof globalThis.fetch }} o
  * @returns {Updater}
  */
-export function realUpdater({ exec, current, fetch }) {
+export function realUpdater({ exec, spawn, cwd, current, fetch }) {
   return {
     current,
     installOf: () => installOf(),
     latest: () => latestManifest({ fetch }),
     globals: globalTools,
     install: async (prefix, specs) => {
-      const r = await exec(npmBin(), ['install', '--global', '--prefix', prefix, ...specs])
+      const r = await exec(npmBin(), ['install', '--global', '--prefer-online', '--prefix', prefix, ...specs])
       if (r.code !== 0) throw new Error(`npm install ${specs.join(' ')} failed: ${(r.stderr || r.stdout).trim()}`)
     },
     versions: () => toolVersions(),
+    missing: (specs) => missingOnRegistry(specs, { fetch }),
+    // The bin on disk now, so after an install it is the new version's doctor.
+    doctor: () =>
+      spawn(process.execPath, [join(installOf()?.dir ?? PKG_DIR, 'bin', 'oakgreen.mjs'), 'doctor'], { cwd }),
   }
 }
 
@@ -185,10 +255,35 @@ export function realUpdater({ exec, current, fetch }) {
  * `oakgreen update [--check]`.
  *
  * @param {{ check: boolean }} opts
- * @param {{ updater: Updater, services: import('./services.mjs').Ports, platform?: string, out: (s: string) => void }} io
+ * @param {{ updater: Updater, services: import('./services.mjs').Ports, platform?: string, out: (s: string) => void,
+ *   sleep?: (ms: number) => Promise<unknown> }} io
  * @returns {Promise<{ ok: boolean, error?: string }>}
  */
-export async function runUpdate({ check }, { updater, services, platform, out }) {
+export async function runUpdate({ check }, io) {
+  const r = await update({ check }, io)
+  if (!check && r.installed !== false) await doctor(io)
+  return r.ok ? { ok: true } : { ok: false, error: r.error }
+}
+
+/** Runs the installed `oakgreen doctor`. @param {{ updater: Updater, out: (s: string) => void }} io */
+async function doctor({ updater, out }) {
+  out('\nchecking this machine with the installed oakgreen: oakgreen doctor\n')
+  const code = await updater.doctor().catch((/** @type {Error} */ err) => {
+    out(`✗ oakgreen doctor did not run: ${err?.message ?? err}\n`)
+    return null
+  })
+  if (code !== null && code !== 0) out('oakgreen doctor found something to change; `oakgreen setup` fixes most of it\n')
+}
+
+/**
+ * The update itself. `installed: false` when it stopped before the install was in its new state (nothing done, or
+ * the install failed), so there is nothing new for doctor to check.
+ * @param {{ check: boolean }} opts
+ * @param {{ updater: Updater, services: import('./services.mjs').Ports, platform?: string, out: (s: string) => void,
+ *   sleep?: (ms: number) => Promise<unknown> }} io
+ * @returns {Promise<{ ok: boolean, error?: string, installed?: boolean }>}
+ */
+async function update({ check }, { updater, services, platform, out, sleep = defaultSleep }) {
   const latest = await updater.latest()
   const self = newer(latest.version, updater.current)
   const where = updater.installOf()
@@ -215,11 +310,36 @@ export async function runUpdate({ check }, { updater, services, platform, out })
   if (!where)
     return {
       ok: false,
+      installed: false,
       error: `oakgreen ${updater.current} → ${latest.version} available, but this oakgreen is not a global npm install (<prefix>/lib/node_modules/oakgreen); update it the way it was installed`,
     }
   const specs = [...(self ? [`${PACKAGE}@${latest.version}`] : []), ...stale.map((t) => `${t.name}@${t.to}`)]
+  const needed = neededSpecs(specs, latest)
+  for (let attempt = 0; ; attempt++) {
+    const missing = await updater.missing(needed)
+    if (!missing.length) break
+    if (attempt >= REGISTRY_WAITS.length)
+      return {
+        ok: false,
+        installed: false,
+        error: `the npm registry does not serve ${missing.join(' ')} yet (a release can take a few minutes to reach it); nothing was installed, run \`oakgreen update\` again shortly`,
+      }
+    out(`… the registry does not serve ${missing.join(' ')} yet; looking again in ${REGISTRY_WAITS[attempt]}s\n`)
+    await sleep(REGISTRY_WAITS[attempt] * 1000)
+  }
   out(`installing ${specs.join(' ')} into ${where.prefix}…\n`)
-  await updater.install(where.prefix, specs)
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await updater.install(where.prefix, specs)
+      break
+    } catch (err) {
+      const msg = /** @type {Error} */ (err)?.message ?? String(err)
+      if (!NOT_ON_REGISTRY.test(msg) || attempt >= REGISTRY_WAITS.length)
+        return { ok: false, installed: false, error: msg }
+      out(`… npm cannot find a version yet; trying again in ${REGISTRY_WAITS[attempt]}s\n`)
+      await sleep(REGISTRY_WAITS[attempt] * 1000)
+    }
+  }
   for (const l of lines) out(`✓ ${l}\n`)
   showVersions()
   if ((platform ?? process.platform) !== 'darwin') return { ok: true }

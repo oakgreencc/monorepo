@@ -19,7 +19,7 @@ sidebar:
 | `oakgreen stop [service...]` | Disables and unloads each, in reverse order. Stays stopped across logins until `start`. |
 | `oakgreen restart [service...]` | A new process for each, on the same agent definition. Default: every installed service. |
 | `oakgreen reload [service...]` | Re-reads each agent's plist (environment, program), then starts it. |
-| `oakgreen update [--check]` | Installs the latest oakgreen and its tools, then restarts running services. `--check` only reports. |
+| `oakgreen update [--check]` | Installs the latest oakgreen and its tools, restarts running services, then runs `oakgreen doctor`. `--check` only reports. |
 
 `--config` is cambium's config file. Default: `$CAMBIUM_CONFIG`, then `~/.cambium/config.json`.
 
@@ -56,6 +56,9 @@ launchd user agents, macOS only. Handled in this order:
 - A tool also installed on its own (`<prefix>/lib/node_modules/@oakgreencc/<tool>`) is upgraded to the version the latest oakgreen depends on, when older. A newer one is left alone. This copy is the one on `PATH` and in the cambium agent.
 - `oakgreen update` runs one `npm install --global --prefix <prefix>` with `oakgreen@<latest>` (if newer) and each such `@oakgreencc/<tool>@<version>`, then restarts each running service (macOS). A stopped service stays stopped. Exit 1 if the install or a restart fails.
 - When oakgreen is current but a standalone tool is behind, only the tool is installed. `--check` lists both.
+- Before installing, each exact version the install needs (oakgreen and the tool versions it pins) is looked up on the registry. If one is not served yet, which happens for a few minutes after a release, it looks again after 10, 20, 30, 60, 60 and 60 seconds. Still missing after that: exit 1, nothing installed.
+- npm runs with `--prefer-online`. An npm `ETARGET` or `E404` is retried on the same schedule. Other npm errors are not retried.
+- Every run except `--check` ends with `oakgreen doctor` from the installed oakgreen, so an update shows the new version's checks. It also runs when oakgreen is up to date. It does not run when the install failed or did not start. A failing doctor check does not change the exit code.
 - Every run lists versions: oakgreen (also the proxy service), then graft, canker, deadwood, cambium, mycelium and canopy, each from its standalone copy if there is one, else the one bundled with oakgreen. After an install these are the new versions. otelcol is not listed.
 
 ## Doctor checks
