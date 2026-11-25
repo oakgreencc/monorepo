@@ -15,7 +15,7 @@ graft status agent/my-branch
 
 It lists uncommitted paths and local commits no branch on GitHub contains, checked through the API. `nothing local that GitHub does not have` means it is safe to remove.
 
-If the work is merged, `graft worktree done agent/my-branch` rewinds the branch so worktree tools stop counting published commits as lost. It exits 1, changing nothing, if anything is local only. With graft's hooks wired, ExitWorktree `remove` runs it for you and is refused when something is local only.
+If the work is merged, `graft worktree done agent/my-branch` rewinds the branch so worktree tools stop counting published commits as lost. It exits 1, changing nothing, if anything is local only. `graft pr merge` runs it for you when run inside the PR's own worktree. If the PR merged some other way, run it yourself before ExitWorktree `remove`: ExitWorktree counts commits before any hook runs, so a hook cannot do it in time.
 
 ## Find why cambium kept a worktree
 

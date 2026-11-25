@@ -72,7 +72,7 @@ graft pr update <n>
 
 | Verb | Behaviour |
 | --- | --- |
-| `pr merge` | Merges the PR if the [merge policy](/reference/graft/refusals/#graft-pr-merge-refusals) allows. `--auto` arms auto-merge; a PR that is already mergeable is merged at once. |
+| `pr merge` | Merges the PR if the [merge policy](/reference/graft/refusals/#graft-pr-merge-refusals) allows. `--auto` arms auto-merge; a PR that is already mergeable is merged at once. After a merge, run inside the PR's own worktree, it runs `graft worktree done` there. A failure there is reported and does not fail the merge. |
 | `pr update` | Brings the PR up to date with its base. |
 
 ### `graft issue`
@@ -108,7 +108,7 @@ Bodies come only from files. `--body-file -` reads stdin. An inline `--body` is 
 | `graft jobs` | `graft jobs <run-id \| run URL> [--logs <dir>] [--all]` | A workflow run's jobs; `--logs` saves job logs. |
 | `graft ci wait` | `graft ci wait <sha\|ref> [--check <name>] [--timeout <s>] [--interval <s>]` | One check's verdict. Default check: `requiredCheck`. |
 | `graft status` | `graft status [<branch>] [--base <b>]` | What the worktree holds that GitHub does not: uncommitted paths, and local commits no branch on GitHub contains. Read through the API, no fetch. |
-| `graft worktree done` | `graft worktree done [<branch>]` | If GitHub holds everything, rewinds the branch to the commit the worktree was created on and fast-forwards the main checkout's base branch. Otherwise prints what is local only, exits 1, changes nothing. ExitWorktree `remove` runs it first through the `finish-worktree` hook. |
+| `graft worktree done` | `graft worktree done [<branch>]` | If GitHub holds everything, rewinds the branch to the commit the worktree was created on and fast-forwards the main checkout's base branch. Otherwise prints what is local only, exits 1, changes nothing. `graft pr merge` runs it after merging, when run inside the PR's own worktree (its HEAD is the PR head). |
 | `graft credential get` | — | git credential helper; git runs it. |
 
 ### `graft ci wait` exit codes
