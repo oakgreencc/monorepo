@@ -22,7 +22,7 @@ const USAGE = `oakgreen ${PKG.version} — the oakgreen stack in one command
   oakgreen stop [service...]    stop each and keep it stopped across logins, until start
   oakgreen restart [service...] new process for each (default: all installed), e.g. after an npm update
   oakgreen reload [service...]  also re-read each agent's plist (its env), waiting for the old one to stop
-  oakgreen update [--check]     install the latest oakgreen (and its tools), then restart running services
+  oakgreen update [--check]     install the latest oakgreen (and its tools), restart running services, then doctor
   oakgreen proxy [--port n]     serve http://<name>.localhost/ (canopy, jaeger, ~/.oakgreen/proxy.json) on :80
   oakgreen proxy install [--port n] [--dry-run]   write its launchd agent (oakgreen start does this)
   oakgreen <tool> [args...]     run ${Object.keys(TOOLS).join(', ')}
@@ -154,7 +154,7 @@ export async function main(argv, ports = {}) {
       const r = await runUpdate(
         { check: rest.includes('--check') },
         {
-          updater: ports.updater ?? realUpdater({ exec, current: PKG.version }),
+          updater: ports.updater ?? realUpdater({ exec, spawn, cwd, current: PKG.version }),
           services: {
             exec,
             home,
@@ -164,6 +164,7 @@ export async function main(argv, ports = {}) {
             now,
           },
           platform: ports.platform,
+          sleep: ports.sleep,
           out: stdout,
         },
       )
