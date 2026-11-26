@@ -164,9 +164,9 @@ A credential (marked † below) in `forest.json` is refused, and so is a key myc
 | `MYCELIUM_DISCORD_GUILD`                                     | guild id; required for forum channels, used for message links                                                                         |
 | `MYCELIUM_DISCORD_NOTIFY`                                    | `true` answers Discord reporters ([Notify](#notify)); the token then needs Send Messages                                              |
 | `MYCELIUM_NOTIFY_INTERVAL_S`                                 | notifier interval in `run`, default 60                                                                                                |
-| `MYCELIUM_DECISIONS_CHANNEL` | text channel id whose threads carry the [broker](#broker)'s topics; never also in `MYCELIUM_DISCORD_CHANNELS`; unset: no broker |
-| `MYCELIUM_BROKER_DB` | broker store, default `~/.oakgreen/mycelium/broker.db` |
-| `MYCELIUM_BROKER_INTERVAL_S` | broker drain and receive interval in `run`, default 30 |
+| `MYCELIUM_DECISIONS_CHANNEL`                                 | text channel id whose threads carry the [broker](#broker)'s topics; never also in `MYCELIUM_DISCORD_CHANNELS`; unset: no broker       |
+| `MYCELIUM_BROKER_DB`                                         | broker store, default `~/.oakgreen/mycelium/broker.db`                                                                                |
+| `MYCELIUM_BROKER_INTERVAL_S`                                 | broker drain and receive interval in `run`, default 30                                                                                |
 | `MYCELIUM_ASC_KEY_ID`, `MYCELIUM_ASC_ISSUER_ID` †            | App Store Connect API key, shared by `asc` and `testflight` (read access to reviews and beta feedback; no other credential)           |
 | `MYCELIUM_ASC_KEY_P8` †                                      | the `.p8` PEM, or its base64                                                                                                          |
 | `MYCELIUM_ASC_APP_ID`                                        | the app's numeric App Store Connect id                                                                                                |
