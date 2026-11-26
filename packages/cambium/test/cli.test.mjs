@@ -20,8 +20,11 @@ import { harness, SLUG } from './fakes.mjs'
 
 function setup(/** @type {any} */ extra = {}) {
   const home = mkdtempSync(join(tmpdir(), 'cambium-'))
-  const cfg = join(home, 'config.json')
-  writeFileSync(cfg, JSON.stringify({ host: 'mac', repos: [{ slug: SLUG, path: '/repo' }], paths: { home }, ...extra }))
+  const cfg = join(home, 'forest.json')
+  writeFileSync(
+    cfg,
+    JSON.stringify({ cambium: { host: 'mac', repos: [{ slug: SLUG, path: '/repo' }], paths: { home }, ...extra } }),
+  )
   /** @type {string[]} */
   const out = []
   /** @type {string[]} */
@@ -29,7 +32,7 @@ function setup(/** @type {any} */ extra = {}) {
   const io = {
     out: (/** @type {string} */ l) => out.push(l),
     err: (/** @type {string} */ l) => err.push(l),
-    env: { CAMBIUM_CONFIG: cfg, HOME: home, PATH: '/usr/bin' },
+    env: { OAKGREEN_FOREST_CONFIG_PATH: cfg, HOME: home, PATH: '/usr/bin' },
   }
   return { home, cfg, out, err, io }
 }
@@ -254,11 +257,13 @@ const rewrite = (s, extra) =>
   writeFileSync(
     s.cfg,
     JSON.stringify({
-      host: 'mac',
-      repos: [{ slug: SLUG, path: '/repo' }],
-      paths: { home: s.home },
-      tickSeconds: 0,
-      ...extra,
+      cambium: {
+        host: 'mac',
+        repos: [{ slug: SLUG, path: '/repo' }],
+        paths: { home: s.home },
+        tickSeconds: 0,
+        ...extra,
+      },
     }),
   )
 
@@ -285,7 +290,7 @@ test('config reload: a broken file keeps the running config and warns once; fixi
   })
   const warns = h.events.filter((e) => e.level === 'warn').map((e) => e.msg)
   assert.equal(warns.length, 2, `one warning per distinct problem, not per tick: ${warns.join(' | ')}`)
-  assert.match(warns[0], /config not reloaded, keeping the running one: .*config\.json/)
+  assert.match(warns[0], /config not reloaded, keeping the running one: .*forest\.json/)
   assert.match(warns[1], /config not reloaded, keeping the running one: no repos/)
   assert.equal(h.deps.config.phases.task.cap, 2)
 })

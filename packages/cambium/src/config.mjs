@@ -1,11 +1,11 @@
 // @ts-check
 /**
- * The one config file. Every field is optional except `repos`; `loadConfig`
- * merges the file over {@link defaults} and resolves `~` in paths.
+ * cambium's config: the `cambium` section of forest.json (forest.mjs). Every field is optional except `repos`;
+ * `loadConfig` merges the section over {@link defaults} and resolves `~` in paths.
  */
-import { existsSync, readFileSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
 import { join, resolve } from 'node:path'
+import { assertMigrated, forestPath, readForest, sectionOf } from './forest.mjs'
 
 /**
  * @typedef {{
@@ -111,7 +111,8 @@ import { join, resolve } from 'node:path'
 /** @type {readonly MergePolicy[]} */
 const MERGE_POLICIES = Object.freeze(['none', 'green'])
 
-export const DEFAULT_HOME = join(homedir(), '.cambium')
+/** State and logs: `~/.oakgreen/cambium`. */
+export const DEFAULT_HOME = join(homedir(), '.oakgreen', 'cambium')
 
 /** @param {string} home @returns {Config} */
 export function defaults(home = DEFAULT_HOME) {
@@ -176,9 +177,9 @@ function merge(base, over) {
   return out
 }
 
-/** The config path: `--config`, then `$CAMBIUM_CONFIG`, then `~/.cambium/config.json`. */
+/** forest.json's path: `--config`, then `$OAKGREEN_FOREST_CONFIG_PATH`, then `~/.oakgreen/forest.json`. */
 export function configPath(/** @type {string | undefined} */ flag, env = process.env) {
-  return untilde(flag ?? env.CAMBIUM_CONFIG ?? join(DEFAULT_HOME, 'config.json'))
+  return forestPath(flag, { env })
 }
 
 /** The phase caps a repo may override. */
@@ -380,7 +381,6 @@ function releaseSignal(slug, raw) {
   )
 }
 
-/** @param {string} path */
 /**
  * What the daemon bakes in at start: the host its leases name, the engine (switching it under live workers is
  * unsafe, see #42), the db/log/heartbeat paths it opened, and graft's App identity in its children's env.
@@ -415,10 +415,16 @@ export function applyReload(live, next) {
   return { applied, restart }
 }
 
-export function loadConfig(path) {
-  if (!existsSync(path)) return resolveConfig({})
+/**
+ * forest.json's `cambium` section, resolved. No file: the defaults. Throws when the file does not parse, when the
+ * section is invalid, and on a machine still holding `~/.cambium` with no section (run `oakgreen config migrate`).
+ * @param {string} path @param {Record<string, string | undefined>} [env]
+ */
+export function loadConfig(path, env = process.env) {
+  const { forest } = readForest(path)
+  assertMigrated('cambium', forest, { env })
   try {
-    return resolveConfig(JSON.parse(readFileSync(path, 'utf8')))
+    return resolveConfig(sectionOf(forest, 'cambium'))
   } catch (err) {
     throw new Error(`${path}: ${/** @type {Error} */ (err).message}`)
   }

@@ -58,18 +58,37 @@ test('hostnameOf, classify and isLoopback', () => {
   assert.ok(!isLoopback('192.168.1.5') && !isLoopback('::ffff:10.0.0.2') && !isLoopback(undefined))
 })
 
-test('loadRoutes: defaults, overlaid by ~/.oakgreen/proxy.json; null drops one; bad entries are reported', () => {
-  assert.deepEqual(
-    loadRoutes('/h', () => null),
-    { routes: { canopy: 4317, jaeger: 16686 }, errors: [] },
-  )
-  const r = loadRoutes('/h', (p) => {
-    assert.equal(p, '/h/.oakgreen/proxy.json')
-    return JSON.stringify({ routes: { Grafana: 3000, jaeger: null, canopy: 4400, 'bad name': 1, x: 70000 } })
+test("loadRoutes: defaults, overlaid by forest.json's proxy section; null drops one; bad entries are reported", () => {
+  const none = () => false
+  assert.deepEqual(loadRoutes({ home: '/h', read: () => null, exists: none }), {
+    routes: { canopy: 4317, jaeger: 16686 },
+    errors: [],
+  })
+  const r = loadRoutes({
+    home: '/h',
+    exists: none,
+    read: (p) => {
+      assert.equal(p, '/h/.oakgreen/forest.json')
+      return JSON.stringify({
+        proxy: { routes: { Grafana: 3000, jaeger: null, canopy: 4400, 'bad name': 1, x: 70000 } },
+      })
+    },
   })
   assert.deepEqual(r.routes, { canopy: 4400, grafana: 3000 })
   assert.equal(r.errors.length, 2)
-  assert.match(loadRoutes('/h', () => '{').errors[0], /proxy\.json/)
+  assert.match(loadRoutes({ home: '/h', read: () => '{', exists: none }).errors[0], /forest\.json/)
+  const elsewhere = loadRoutes({
+    home: '/h',
+    env: { OAKGREEN_FOREST_CONFIG_PATH: '/f.json' },
+    exists: none,
+    read: (p) => (p === '/f.json' ? '{"proxy":{"routes":{"x":1}}}' : null),
+  })
+  assert.equal(elsewhere.routes.x, 1)
+})
+
+test('loadRoutes: only the old ~/.oakgreen/proxy.json there is refused, naming oakgreen config migrate', () => {
+  const exists = (/** @type {string} */ p) => p === '/h/.oakgreen/proxy.json'
+  assert.throws(() => loadRoutes({ home: '/h', read: () => null, exists }), /proxy\.json.*oakgreen config migrate/)
 })
 
 test('proxy: routes by name, rewrites Host for the upstream, refuses foreign Hosts, lists routes, 404s and 502s', async (t) => {
@@ -143,7 +162,7 @@ test('oakgreen proxy install --dry-run prints the agent with its flags; bad flag
   assert.equal(await main(['proxy', 'install', '--dry-run', '--port', '8080'], io), 0)
   assert.match(out, /would write \/Users\/me\/Library\/LaunchAgents\/com\.oakgreencc\.proxy\.plist/)
   assert.match(out, /<string>proxy<\/string>\n {4}<string>--port<\/string>\n {4}<string>8080<\/string>/)
-  assert.match(out, /\/Users\/me\/\.oakgreen\/logs\/proxy\.log/)
+  assert.match(out, /\/Users\/me\/\.oakgreen\/proxy\/logs\/proxy\.log/)
   assert.equal(await main(['proxy', '--port', 'x'], io), 2)
   assert.match(err, /--port must be 0-65535/)
   assert.equal(await main(['proxy', '--bogus'], io), 2)

@@ -26,7 +26,7 @@ sidebar:
 
 For a `why:budget` item, cambium writes a session brief: the issue, what each attempt tried and why it failed, the last failure, its PRs, and the repository's verify and publish commands. canopy shows it in the reading pane under **Interactive session**.
 
-1. Select **Copy**. The command looks like `cd ~/src/repo && claude "$(cat ~/.cambium/briefs/owner__repo/issue-42.md)"`.
+1. Select **Copy**. The command looks like `cd ~/src/repo && claude "$(cat ~/.oakgreen/cambium/briefs/owner__repo/issue-42.md)"`.
 2. Paste it into a terminal. claude starts in the repository with the brief as its first message.
 3. Once the fix is published, move the issue out of `q:human`. The brief is deleted on the next tick.
 
@@ -44,7 +44,7 @@ For an `ask:decide` + `ask:session` item. You need the oakgreen plugin in Claude
 
 On commit, cambium files the follow-ups to `q:intake` and posts the decision on the issue in your name; triage then picks the issue up again. The decisions are yours: Claude finds facts and recommends; it does not choose.
 
-You can stop at any point and come back later, on this machine or another. Progress is kept in a `Decision in progress` comment on the issue, and `/oakgreen:decide` resumes from it without asking anything already answered. While that comment says in progress, comments on the issue do not send it back to triage. Mocks are saved under `~/.cambium/decide/<owner>__<repo>/issue-<n>/mocks/`.
+You can stop at any point and come back later, on this machine or another. Progress is kept in a `Decision in progress` comment on the issue, and `/oakgreen:decide` resumes from it without asking anything already answered. While that comment says in progress, comments on the issue do not send it back to triage. Mocks are saved under `~/.oakgreen/cambium/decide/<owner>__<repo>/issue-<n>/mocks/`.
 
 Without the plugin, `cambium decide show` and `cambium decide advance` do the same steps by hand: [CLI reference](/reference/cambium/cli/#decisions).
 

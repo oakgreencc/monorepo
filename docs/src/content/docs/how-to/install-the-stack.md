@@ -42,9 +42,9 @@ In Kiro: **Powers** → **Add Custom Power** → **Import power from a repositor
    oakgreen setup --repo owner/name
    ```
 
-   It writes a cambium config skeleton at `~/.cambium/config.json` if none exists, creates the queue labels, and writes the label guide `docs/agents/triage-labels.md` plus a pointer in `CLAUDE.md` or `AGENTS.md`. Commit those two files yourself.
+   It writes a `cambium` section into `~/.oakgreen/forest.json` if there is none, creates an empty `~/.oakgreen/env` (mode 600) for secrets, creates the queue labels, and writes the label guide `docs/agents/triage-labels.md` plus a pointer in `CLAUDE.md` or `AGENTS.md`. Commit those two files yourself.
 
-5. In `~/.cambium/config.json`, set `graft.app` to the App slug, `graft.botLogin` to `<slug>[bot]` and `worker.graftApp` to the slug workers act as (often the same).
+5. In the `cambium` section of `~/.oakgreen/forest.json`, set `graft.app` to the App slug, `graft.botLogin` to `<slug>[bot]` and `worker.graftApp` to the slug workers act as (often the same).
 6. Make sure the repository's `.gitignore` contains `.claude/worktrees`.
 7. Start the services:
 

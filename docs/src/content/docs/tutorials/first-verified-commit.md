@@ -42,7 +42,7 @@ graft setup app
 
 Your browser opens GitHub's "create App" page with the permissions already filled in. Click **Create GitHub App**. GitHub then shows the install page: choose **Only select repositories**, pick `sandbox`, and install.
 
-Back in the terminal, graft reports that it saved the App's private key under `~/.config/graft/apps/`.
+Back in the terminal, graft reports that it saved the App's private key under `~/.oakgreen/graft/apps/`.
 
 ## 3. Bootstrap the repository
 

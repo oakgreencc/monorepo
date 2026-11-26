@@ -1146,7 +1146,7 @@ function sourcesSection(act, on, off, now) {
   })
   const table = on.length ? h('div', { class: 'scroll', tabindex: 0, 'aria-label': 'Configured sources' }, h('table', { class: 'stack-sm' },
     h('thead', {}, h('tr', {}, ['source', 'reads', 'state', 'every', 'last pass', 'next', '24h', '7d'].map((t) => h('th', {}, t)))),
-    h('tbody', {}, rows))) : h('div', { class: 'empty' }, 'No source is configured. mycelium reads its settings from ~/.mycelium/env; see its README, Configuration.')
+    h('tbody', {}, rows))) : h('div', { class: 'empty' }, 'No source is configured. mycelium reads its settings from ~/.oakgreen/forest.json and ~/.oakgreen/env; see its README, Configuration.')
   return h('section', { 'aria-label': 'Sources' },
     h('h2', {}, 'Configured', h('span', { class: 'n' }, on.length)),
     table,

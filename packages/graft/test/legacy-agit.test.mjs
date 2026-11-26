@@ -6,10 +6,8 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { graftHome, locateProjectConfig } from '../src/config.mjs'
+import { locateProjectConfig } from '../src/config.mjs'
 import { grantsItself } from '../src/hooks/guard-protected.mjs'
 import { keyDiffers, policyFrom } from '../src/protected.mjs'
 import { isGraftHelper, mergeSettings } from '../src/setup/settings.mjs'
@@ -62,19 +60,4 @@ test('settings: the old credential helper is recognised; old hook lines are upgr
     out.hooks.PreToolUse[0].hooks.map((h) => h.command),
     ['graft hook guard-protected'],
   )
-})
-
-test('home: AGIT_HOME is honoured, and ~/.config/agit is used until ~/.config/graft exists', () => {
-  assert.equal(graftHome({ AGIT_HOME: '/x' }), '/x')
-  assert.equal(graftHome({ GRAFT_HOME: '/y', AGIT_HOME: '/x' }), '/y')
-  const xdg = mkdtempSync(join(tmpdir(), 'graft-home-'))
-  try {
-    assert.equal(graftHome({ XDG_CONFIG_HOME: xdg }), join(xdg, 'graft'))
-    mkdirSync(join(xdg, 'agit'))
-    assert.equal(graftHome({ XDG_CONFIG_HOME: xdg }), join(xdg, 'agit'))
-    mkdirSync(join(xdg, 'graft'))
-    assert.equal(graftHome({ XDG_CONFIG_HOME: xdg }), join(xdg, 'graft'))
-  } finally {
-    rmSync(xdg, { recursive: true, force: true })
-  }
 })

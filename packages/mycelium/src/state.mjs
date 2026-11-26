@@ -1,13 +1,11 @@
 // @ts-check
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { serviceDir } from './forest.mjs'
 
-/** @param {Record<string, string | undefined>} env */
-export function defaultStatePath(env = process.env) {
-  if (env.MYCELIUM_STATE) return env.MYCELIUM_STATE
-  const root = env.XDG_STATE_HOME || join(homedir(), '.local', 'state')
-  return join(root, 'mycelium', 'state.json')
+/** `$MYCELIUM_STATE`, else `~/.oakgreen/mycelium/state.json`. @param {Record<string, string | undefined>} env @param {string} [home] */
+export function defaultStatePath(env = process.env, home = undefined) {
+  return env.MYCELIUM_STATE || join(serviceDir('mycelium', { env, home }), 'state.json')
 }
 
 /**

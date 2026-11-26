@@ -7,7 +7,7 @@ sidebar:
 
 This fits a repository where agents merge into one branch (say `develop`) and releases come from another (`main`). It needs the graph engine.
 
-1. On the repository's `repos[]` entry in `~/.cambium/config.json`:
+1. On the repository's `repos[]` entry in the `cambium` section of `~/.oakgreen/forest.json`:
 
    ```json
    {

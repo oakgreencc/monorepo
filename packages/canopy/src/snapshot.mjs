@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * cambium's queue view (`paths.queues`, default `~/.cambium/queues.json`): the board cambium builds from the
+ * cambium's queue view (`paths.queues`, default `~/.oakgreen/cambium/queues.json`): the board cambium builds from the
  * snapshot it reads every tick. canopy shows it as is and queries GitHub itself only for the repos the file cannot
  * answer for: when it is missing, unreadable, of another version, or older than {@link STALE_TICKS} ticks (cambium
  * is down), or when it does not list the repo.

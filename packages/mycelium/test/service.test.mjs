@@ -3,7 +3,15 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { main } from '../src/cli.mjs'
-import { envFilePath, parseEnvFile, withEnvFile } from '../src/envfile.mjs'
+import {
+  envFilePath,
+  envKeyOf,
+  forestKeyOf,
+  parseEnvFile,
+  SECRET_KEYS,
+  SETTING_KEYS,
+  withEnvFile,
+} from '../src/envfile.mjs'
 
 test('parseEnvFile: comments, export, bare, double and shell single quotes', () => {
   const text = [
@@ -23,21 +31,62 @@ test('parseEnvFile: comments, export, bare, double and shell single quotes', () 
   })
 })
 
-test('withEnvFile: $MYCELIUM_ENV else ~/.mycelium/env; the environment wins; no file is fine', () => {
-  assert.equal(envFilePath({}, '/h'), '/h/.mycelium/env')
-  assert.equal(envFilePath({ MYCELIUM_ENV: '/x/env' }, '/h'), '/x/env')
-  /** @type {string[]} */
-  const asked = []
-  const read = (/** @type {string} */ p) => {
-    asked.push(p)
-    return 'MYCELIUM_REPO=file/repo\nMYCELIUM_BACKFILL_HOURS=6\n'
-  }
-  const r = withEnvFile({ MYCELIUM_REPO: 'env/repo', MYCELIUM_BACKFILL_HOURS: '' }, { home: '/h', read })
-  assert.deepEqual(asked, ['/h/.mycelium/env'])
-  assert.equal(r.file, '/h/.mycelium/env')
-  assert.equal(r.env.MYCELIUM_REPO, 'env/repo')
-  assert.equal(r.env.MYCELIUM_BACKFILL_HOURS, '6', 'an empty variable does not hide the file')
-  assert.deepEqual(withEnvFile({ A: '1' }, { home: '/h', read: () => null }), { env: { A: '1' }, file: null })
+/** A reader over an in-memory home. @param {Record<string, string>} files */
+const reader = (files) => (/** @type {string} */ p) => files[p] ?? null
+const none = () => false
+
+test('withEnvFile: environment over ~/.oakgreen/env over forest.json over default; no files is fine', () => {
+  assert.equal(envFilePath({ home: '/h' }), '/h/.oakgreen/env')
+  const read = reader({
+    '/h/.oakgreen/forest.json': JSON.stringify({
+      mycelium: { repo: 'forest/repo', backfillHours: 12, discordChannels: ['1', 'forum:2'], discordNotify: true },
+    }),
+    '/h/.oakgreen/env': 'MYCELIUM_DISCORD_TOKEN=t\nMYCELIUM_BACKFILL_HOURS=6\n',
+  })
+  const r = withEnvFile(
+    { MYCELIUM_REPO: 'env/repo', MYCELIUM_NOTIFY_INTERVAL_S: '' },
+    { home: '/h', read, exists: none },
+  )
+  assert.equal(r.file, '/h/.oakgreen/env')
+  assert.equal(r.forest, '/h/.oakgreen/forest.json')
+  assert.equal(r.env.MYCELIUM_REPO, 'env/repo', 'the environment beats forest.json')
+  assert.equal(r.env.MYCELIUM_BACKFILL_HOURS, '6', 'the env file beats forest.json')
+  assert.equal(r.env.MYCELIUM_DISCORD_TOKEN, 't')
+  assert.equal(r.env.MYCELIUM_DISCORD_CHANNELS, '1,forum:2')
+  assert.equal(r.env.MYCELIUM_DISCORD_NOTIFY, 'true')
+  assert.equal(r.env.MYCELIUM_NOTIFY_INTERVAL_S, undefined, 'unset everywhere: the default applies')
+  assert.deepEqual(withEnvFile({ A: '1' }, { home: '/h', read: () => null, exists: none }), {
+    env: { A: '1' },
+    file: null,
+    forest: '/h/.oakgreen/forest.json',
+  })
+})
+
+test('withEnvFile: $OAKGREEN_FOREST_CONFIG_PATH names another forest.json', () => {
+  const read = reader({ '/etc/forest.json': '{"mycelium":{"repo":"o/elsewhere"}}' })
+  const env = { OAKGREEN_FOREST_CONFIG_PATH: '/etc/forest.json' }
+  assert.equal(withEnvFile(env, { home: '/h', read, exists: none }).env.MYCELIUM_REPO, 'o/elsewhere')
+})
+
+test('withEnvFile: a credential in forest.json is refused; so is an unknown key', () => {
+  const at = (/** @type {object} */ mycelium) =>
+    withEnvFile(
+      {},
+      { home: '/h', read: reader({ '/h/.oakgreen/forest.json': JSON.stringify({ mycelium }) }), exists: none },
+    )
+  assert.throws(() => at({ discordToken: 'x' }), /credential; set MYCELIUM_DISCORD_TOKEN in ~\/\.oakgreen\/env/)
+  assert.throws(() => at({ nope: 1 }), /not a mycelium setting/)
+})
+
+test('withEnvFile: only the old ~/.mycelium there fails, naming oakgreen config migrate', () => {
+  const exists = (/** @type {string} */ p) => p === '/h/.mycelium'
+  assert.throws(() => withEnvFile({}, { home: '/h', read: () => null, exists }), /oakgreen config migrate/)
+})
+
+test('forest keys: camelCase both ways', () => {
+  assert.equal(envKeyOf('discordChannels'), 'MYCELIUM_DISCORD_CHANNELS')
+  assert.equal(envKeyOf('notifyIntervalS'), 'MYCELIUM_NOTIFY_INTERVAL_S')
+  for (const k of [...SETTING_KEYS, ...SECRET_KEYS]) assert.equal(envKeyOf(forestKeyOf(k)), k)
 })
 
 const DISCORD = { MYCELIUM_DISCORD_TOKEN: 't', MYCELIUM_DISCORD_CHANNELS: '1' }
@@ -66,19 +115,23 @@ test('install: writes the agent for `run`, PATH and HOME in it, no secrets', asy
   assert.match(text, /bin\/mycelium\.mjs<\/string>\n {4}<string>run<\/string>/)
   assert.match(text, /<key>PATH<\/key>\n {4}<string>\/bin:\/usr\/bin<\/string>/)
   assert.match(text, /<key>KeepAlive<\/key>\n {2}<true\/>/)
-  assert.match(text, /\/Users\/me\/\.mycelium\/logs\/mycelium\.log/)
-  assert.doesNotMatch(text, /MYCELIUM_DISCORD_TOKEN|MYCELIUM_ENV/)
+  assert.match(text, /\/Users\/me\/\.oakgreen\/mycelium\/logs\/mycelium\.log/)
+  assert.doesNotMatch(text, /MYCELIUM_DISCORD_TOKEN|OAKGREEN_FOREST_CONFIG_PATH/)
   assert.match(r.out, /sources: discord/)
   assert.match(r.out, /oakgreen start mycelium/)
 
-  const custom = await install(['install'], { ...DISCORD, MYCELIUM_REPO: 'o/r', MYCELIUM_ENV: '/etc/myc' })
-  assert.match(custom.writes[0][1], /<key>MYCELIUM_ENV<\/key>\n {4}<string>\/etc\/myc<\/string>/)
+  const custom = await install(['install'], {
+    ...DISCORD,
+    MYCELIUM_REPO: 'o/r',
+    OAKGREEN_FOREST_CONFIG_PATH: '/etc/f.json',
+  })
+  assert.match(custom.writes[0][1], /<key>OAKGREEN_FOREST_CONFIG_PATH<\/key>\n {4}<string>\/etc\/f\.json<\/string>/)
 })
 
 test('install: refused with no source or no repository; --dry-run prints and writes nothing', async () => {
   await assert.rejects(
     install(['install'], { MYCELIUM_REPO: 'o/r' }),
-    /no source is configured.*\/Users\/me\/\.mycelium\/env/,
+    /no source is configured.*\/Users\/me\/\.oakgreen\/forest\.json.*\/Users\/me\/\.oakgreen\/env/,
   )
   await assert.rejects(install(['install'], DISCORD), /MYCELIUM_REPO/)
   const dry = await install(['install', '--dry-run'], {})

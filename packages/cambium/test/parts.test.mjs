@@ -92,7 +92,7 @@ test('marker v2: history keeps 20 entries with nodes, well under the 65,536-char
       outcome: 'failed',
       reason: `ci failed: ${'x'.repeat(300)}`,
       pr: 1000 + i,
-      log: `/Users/someone/.cambium/logs/o-r-${i}.out.log`,
+      log: `/Users/someone/.oakgreen/cambium/logs/o-r-${i}.out.log`,
       spanId: 'c'.repeat(16),
     })
   assert.equal(m.history.length, 20)
@@ -501,8 +501,8 @@ test('launchd plist: KeepAlive, RunAtLoad, start --config, escaped', () => {
   const text = plist({
     node: '/usr/local/bin/node',
     bin: '/x/bin/cambium.mjs',
-    configPath: '/h/.cambium/config & co.json',
-    logsDir: '/h/.cambium/logs',
+    configPath: '/h/.oakgreen/forest & co.json',
+    logsDir: '/h/.oakgreen/cambium/logs',
     home: '/h',
     path: '/usr/bin',
   })
@@ -510,7 +510,7 @@ test('launchd plist: KeepAlive, RunAtLoad, start --config, escaped', () => {
   assert.match(text, /<key>RunAtLoad<\/key>\s*<true\/>/)
   assert.match(
     text,
-    /<string>start<\/string>\s*<string>--config<\/string>\s*<string>\/h\/.cambium\/config &amp; co.json<\/string>/,
+    /<string>start<\/string>\s*<string>--config<\/string>\s*<string>\/h\/.oakgreen\/forest &amp; co.json<\/string>/,
   )
   assert.match(text, /cambium.launchd.err.log/)
   assert.ok(!existsSync('/h'))

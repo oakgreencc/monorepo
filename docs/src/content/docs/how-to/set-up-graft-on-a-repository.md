@@ -25,7 +25,7 @@ Setup opens a browser and stores a private key on this machine, so a person runs
 
 3. In the browser, confirm the App, then install it on **only the repositories agents should work in**.
 4. Review the diff `graft setup project` shows. It writes `.graft.json`, seeds CODEOWNERS and merges into `.claude/settings.json`. Commit those files yourself.
-5. If `gh` is not logged in as a repository admin, import the ruleset it saved under `~/.config/graft/rulesets/` at **Settings** → **Rules** → **New ruleset** → **Import a ruleset**.
+5. If `gh` is not logged in as a repository admin, import the ruleset it saved under `~/.oakgreen/graft/rulesets/` at **Settings** → **Rules** → **New ruleset** → **Import a ruleset**.
 6. Restart every Claude Code session already open in the repository. The git environment and hooks load at session start.
 7. Check:
 

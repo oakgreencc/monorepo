@@ -15,9 +15,9 @@ Start with `oakgreen doctor`. Each failing line names its fix.
 | `graft doctor` fails on App credentials or installation | The App is not created or not installed on this repository. See [Set up graft on a repository](/how-to/set-up-graft-on-a-repository/). |
 | `! labels on <repo>: …` from `oakgreen setup` | The App lacks Issues: write or is not installed there. Run `graft doctor`, then setup again. |
 | `cambium status`: `skipped: no usable cambium config` | The config is missing or not valid JSON. Run `oakgreen setup`, or fix the file it names. |
-| `cambium heartbeat`: `no heartbeat` right after start | The first tick has not finished. Wait 30 s. Still failing: read `~/.cambium/logs/cambium.launchd.err.log`. |
+| `cambium heartbeat`: `no heartbeat` right after start | The first tick has not finished. Wait 30 s. Still failing: read `~/.oakgreen/cambium/logs/cambium.launchd.err.log`. |
 | `oakgreen start` skips cambium | No config at the default path. Run `cambium install --config <file>`, then `oakgreen start cambium`. |
-| `oakgreen start` skips mycelium | No source configured, or `MYCELIUM_REPO` missing from `~/.mycelium/env`. |
+| `oakgreen start` skips mycelium | No source configured, or `repo` missing from the `mycelium` section of `~/.oakgreen/forest.json`. |
 | `Bootstrap failed: 5: Input/output error` | Use `oakgreen reload <service>` instead of raw `launchctl`; it waits for the old process to exit. |
 | `oakgreen services` shows nothing useful on Linux or Windows | Services are macOS only. graft, canker and deadwood still work. |
 
@@ -36,7 +36,7 @@ Start with `oakgreen doctor`. Each failing line names its fix.
 
 | Symptom | Fix |
 | --- | --- |
-| `curl …:4318/v1/traces` is refused | otelcol is not running. Check `oakgreen services otelcol` and `~/.cambium/otel/otelcol.log`; often `otelcol-contrib` is not in `/opt/homebrew/bin` or `/usr/local/bin`. |
+| `curl …:4318/v1/traces` is refused | otelcol is not running. Check `oakgreen services otelcol` and `~/.oakgreen/cambium/logs/otelcol.log`; often `otelcol-contrib` is not in `/opt/homebrew/bin` or `/usr/local/bin`. |
 | No traces in canopy | cambium's agent lost `OTEL_EXPORTER_OTLP_ENDPOINT` (reinstalled?), or `engine` is `legacy`, which is not traced. See [Set up tracing](/how-to/set-up-tracing/). |
 
 ## graft refusals

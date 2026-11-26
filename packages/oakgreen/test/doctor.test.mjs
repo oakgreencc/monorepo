@@ -1,5 +1,7 @@
 // @ts-check
 import assert from 'node:assert/strict'
+import { chmodSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { test } from 'node:test'
 import { satisfies } from '../src/doctor.mjs'
 import { ALL_LABELS, NOW, fakeExec, fakeGithub, run, tempDir } from './helpers.mjs'
@@ -14,8 +16,8 @@ const beat = (/** @type {number} */ agoS) =>
 
 function healthy() {
   const home = tempDir({
-    '.cambium/config.json': JSON.stringify({ repos: [{ slug: 'o/r', path: '/x' }] }),
-    '.cambium/state.json': beat(10),
+    '.oakgreen/forest.json': JSON.stringify({ cambium: { repos: [{ slug: 'o/r', path: '/x' }] } }),
+    '.oakgreen/cambium/state.json': beat(10),
   })
   const cwd = tempDir({
     '.git/HEAD': 'ref: refs/heads/main\n',
@@ -43,6 +45,9 @@ test('a healthy machine passes every check and exits 0', async () => {
     'node',
     'graft doctor',
     'claude on PATH',
+    'forest.json',
+    'env file',
+    'old paths',
     'cambium config',
     'cambium status',
     'cambium heartbeat',
@@ -70,7 +75,7 @@ test('--json reports each check with ok, required and fix', async () => {
 })
 
 test('failures print ✗ with a fix hint and exit 1', async () => {
-  const home = tempDir({ '.cambium/state.json': beat(600) })
+  const home = tempDir({ '.oakgreen/cambium/state.json': beat(600) })
   const cwd = tempDir({ '.git/HEAD': '' })
   const gh = fakeGithub({ 'o/r': ['q:intake', 'q:task'] })
   const { exec } = fakeExec({ graft: () => ({ code: 1, stdout: '✓ node 22\n✗ App installed on o/r\n✗ CODEOWNERS\n' }) })
@@ -88,6 +93,7 @@ test('failures print ✗ with a fix hint and exit 1', async () => {
   assert.equal(by.node.ok, false)
   assert.equal(by['graft doctor'].detail, '2 failing: App installed on o/r; CODEOWNERS')
   assert.equal(by['claude on PATH'].ok, false)
+  assert.equal(by['forest.json'].fix, 'oakgreen setup')
   assert.equal(by['cambium config'].fix, 'oakgreen setup')
   assert.equal(by['cambium status'].detail, 'skipped: no usable cambium config')
   assert.match(by['cambium heartbeat'].detail, /600s ago/)
@@ -130,20 +136,22 @@ test('optional checks alone do not fail the run', async () => {
 
 test('no configured repository is a failed label check', async () => {
   const { ports } = healthy()
-  const home = tempDir({ '.cambium/config.json': '{}' })
+  const home = tempDir({ '.oakgreen/forest.json': '{"cambium":{}}' })
   const r = await run(['doctor', '--json'], { ...ports, home })
   const labels = JSON.parse(r.out).checks.find((/** @type {any} */ c) => c.name === 'queue labels')
   assert.equal(labels.ok, false)
   assert.equal(r.code, 1)
 })
 
-test('--config and $CAMBIUM_CONFIG choose the cambium config', async () => {
+test('--config and $OAKGREEN_FOREST_CONFIG_PATH choose forest.json', async () => {
   const { ports } = healthy()
-  const dir = tempDir({ 'c.json': JSON.stringify({ repos: [{ slug: 'a/b' }], paths: { home: '/nowhere' } }) })
+  const dir = tempDir({
+    'c.json': JSON.stringify({ cambium: { repos: [{ slug: 'a/b' }], paths: { home: '/nowhere' } } }),
+  })
   const gh = fakeGithub({ 'a/b': ALL_LABELS.slice() })
   const viaEnv = await run(['doctor', '--json'], {
     ...ports,
-    env: { CAMBIUM_CONFIG: `${dir}/c.json` },
+    env: { OAKGREEN_FOREST_CONFIG_PATH: `${dir}/c.json` },
     github: gh.client,
   })
   const names = JSON.parse(viaEnv.out).checks.map((/** @type {any} */ c) => c.name)
@@ -151,6 +159,44 @@ test('--config and $CAMBIUM_CONFIG choose the cambium config', async () => {
   const viaFlag = await run(['doctor', '--json', '--config', `${dir}/c.json`], { ...ports, github: gh.client })
   const checks = JSON.parse(viaFlag.out).checks
   assert.match(checks.find((/** @type {any} */ c) => c.name === 'cambium heartbeat').detail, /\/nowhere\/state\.json/)
+})
+
+/** @param {Awaited<ReturnType<typeof run>>} r @param {string} name */
+const checkOf = (r, name) => JSON.parse(r.out).checks.find((/** @type {any} */ c) => c.name === name)
+
+test('forest.json that does not parse fails its check, naming the file', async () => {
+  const { ports } = healthy()
+  writeFileSync(join(ports.home, '.oakgreen', 'forest.json'), '{ nope')
+  const r = await run(['doctor', '--json'], ports)
+  const c = checkOf(r, 'forest.json')
+  assert.equal(c.ok, false)
+  assert.match(c.detail, /forest\.json: /)
+  assert.match(c.fix, /fix the JSON/)
+  assert.equal(r.code, 1)
+})
+
+test('env file: missing passes; 0600 passes; anything looser fails with a chmod fix', async () => {
+  const { ports } = healthy()
+  const env = join(ports.home, '.oakgreen', 'env')
+  writeFileSync(env, 'MYCELIUM_DISCORD_TOKEN=t\n')
+  chmodSync(env, 0o644)
+  const loose = await run(['doctor', '--json'], ports)
+  assert.deepEqual([checkOf(loose, 'env file').ok, checkOf(loose, 'env file').fix], [false, `chmod 600 ${env}`])
+  assert.equal(loose.code, 1)
+  chmodSync(env, 0o600)
+  assert.equal(checkOf(await run(['doctor', '--json'], ports), 'env file').ok, true)
+})
+
+test('old paths: any pre-forest file left fails, pointing at oakgreen config migrate', async () => {
+  const { ports } = healthy()
+  for (const old of ['.cambium/state.json', '.mycelium/env', '.config/graft/config.json', '.oakgreen/proxy.json']) {
+    const home = tempDir({ [old]: '{}', '.oakgreen/forest.json': '{"cambium":{"repos":[]}}' })
+    const r = await run(['doctor', '--json'], { ...ports, home })
+    const c = checkOf(r, 'old paths')
+    assert.equal(c.ok, false, old)
+    assert.match(c.detail, new RegExp(old.split('/')[0].replace('.', '\\.')))
+    assert.equal(c.fix, 'oakgreen config migrate')
+  }
 })
 
 test('satisfies handles the >= ranges the stack declares', () => {

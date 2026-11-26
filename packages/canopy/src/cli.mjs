@@ -15,19 +15,22 @@ import { traceStore } from './traces.mjs'
 export const HELP = `canopy — a local read-only page over cambium's heartbeat and the GitHub queues
 
 usage: canopy [--port <n>] [--host <addr>] [--state <file>] [--queues <file>] [--traces <file>] [--logs <dir>] [--intake <file>] [--config <file>] [--repo <owner/name>]... [--cache <seconds>]
-       canopy install [--dry-run] [same flags]   write the launchd agent, serving with those flags
-                                                 (start it: oakgreen start canopy; --dry-run prints it)
+       canopy install [--dry-run]   write the launchd agent; it takes no flags, settings come from forest.json
+                                    (start it: oakgreen start canopy; --dry-run prints it)
+
+Every flag may instead be set in the "canopy" section of forest.json (port, host, state, queues, traces, logs,
+intake, repos, cache, graft); a flag wins. Defaults come from the "cambium" section and ~/.oakgreen.
 
   --port <n>         listen port (default ${DEFAULT_PORT})
   --host <addr>      listen address (default ${DEFAULT_HOST}; loopback only unless you say otherwise)
-  --state <file>     cambium heartbeat (default: paths.heartbeat from the cambium config, else ~/.cambium/state.json)
-  --queues <file>    cambium's queue view, read instead of GitHub while fresh (default: paths.queues from the
-                     cambium config, else <paths.home>/queues.json)
+  --state <file>     cambium heartbeat (default: cambium's paths.heartbeat, else ~/.oakgreen/cambium/state.json)
+  --queues <file>    cambium's queue view, read instead of GitHub while fresh (default: cambium's paths.queues,
+                     else <paths.home>/queues.json)
   --traces <file>    OTLP/JSON spans from cambium's collector (default: <paths.home>/otel/traces.jsonl)
-  --logs <dir>       cambium's worker logs, for session transcripts (default: paths.logs from the cambium config,
-                     else <paths.home>/logs)
-  --intake <file>    mycelium's status file (default: $MYCELIUM_STATUS, else ~/.mycelium/status.json)
-  --config <file>    cambium config (default: $CAMBIUM_CONFIG, else ~/.cambium/config.json)
+  --logs <dir>       cambium's worker logs, for session transcripts (default: cambium's paths.logs, else
+                     <paths.home>/logs)
+  --intake <file>    mycelium's status file (default: $MYCELIUM_STATUS, else ~/.oakgreen/mycelium/status.json)
+  --config <file>    forest.json (default: $OAKGREEN_FOREST_CONFIG_PATH, else ~/.oakgreen/forest.json)
   --repo <o/n>       repository to show queues for; repeatable (default: the config's repos, else the heartbeat's)
   --cache <seconds>  how long a GitHub answer is reused, when canopy reads GitHub itself (default ${DEFAULT_TTL_MS / 1000}, minimum ${MIN_TTL_MS / 1000})
   --graft <cmd>      graft binary (default: graft on PATH)
@@ -103,15 +106,13 @@ export function main(
     err('canopy: --dry-run only goes with install\n')
     return 2
   }
-  const port = values.port === undefined ? DEFAULT_PORT : Number(values.port)
-  if (!Number.isInteger(port) || port < 0 || port > 65535) {
-    err(`canopy: --port must be 0-65535, got ${values.port}\n`)
-    return 2
-  }
-  const cacheS = values.cache === undefined ? DEFAULT_TTL_MS / 1000 : Number(values.cache)
-  if (!Number.isFinite(cacheS)) {
-    err(`canopy: --cache must be a number of seconds, got ${values.cache}\n`)
-    return 2
+  if (verb === 'install') {
+    const flags = tokens.filter((t) => t.kind === 'option' && t.name !== 'dry-run').map((t) => t.rawName)
+    if (flags.length) {
+      err(`canopy: install takes no serve flags (${flags.join(' ')}); set them in forest.json's "canopy" section\n`)
+      return 2
+    }
+    return install(Boolean(values['dry-run']), { env, home, write, out })
   }
   let settings
   try {
@@ -125,24 +126,25 @@ export function main(
         config: values.config,
         repos: values.repo,
       },
-      { env },
+      { env, ...(home ? { home } : {}) },
     )
   } catch (e) {
     err(`canopy: ${/** @type {Error} */ (e).message}\n`)
     return 2
   }
-  if (verb === 'install') {
-    // The flags were checked above; the agent serves with them exactly as given.
-    const drop = new Set(
-      tokens
-        .filter((t) => t.kind === 'positional' || (t.kind === 'option' && t.name === 'dry-run'))
-        .map((t) => t.index),
-    )
-    const args = argv.filter((_, i) => !drop.has(i))
-    return install(args, Boolean(values['dry-run']), { env, home, write, out })
+  const { serve } = settings
+  const port = Number(values.port ?? serve.port ?? DEFAULT_PORT)
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    err(`canopy: port must be 0-65535, got ${values.port ?? JSON.stringify(serve.port)}\n`)
+    return 2
   }
-  const host = values.host ?? DEFAULT_HOST
-  const gh = client ?? graftClient({ bin: values.graft ?? 'graft' })
+  const cacheS = Number(values.cache ?? serve.cache ?? DEFAULT_TTL_MS / 1000)
+  if (!Number.isFinite(cacheS)) {
+    err(`canopy: cache must be a number of seconds, got ${values.cache ?? JSON.stringify(serve.cache)}\n`)
+    return 2
+  }
+  const host = values.host ?? (typeof serve.host === 'string' ? serve.host : DEFAULT_HOST)
+  const gh = client ?? graftClient({ bin: values.graft ?? (typeof serve.graft === 'string' ? serve.graft : 'graft') })
   const queues = snapshotQueues({
     path: settings.queuesPath,
     github: cachedQueues({ client: gh, ttlMs: cacheS * 1000 }),
@@ -165,23 +167,22 @@ export function main(
 }
 
 /**
- * Write the launchd agent that serves canopy with `args`. Picked up by `oakgreen start canopy`; `oakgreen restart`
- * (and `oakgreen update`) then bring up new code without touching it again.
+ * Write the launchd agent that serves canopy. It carries no settings: canopy reads forest.json at start. Picked up by
+ * `oakgreen start canopy`; `oakgreen restart` (and `oakgreen update`) then bring up new code and settings.
  *
- * @param {string[]} args @param {boolean} dryRun
+ * @param {boolean} dryRun
  * @param {{ env: Record<string, string | undefined>, home?: string, write?: (path: string, text: string) => void,
  *   out: (s: string) => void }} io
  */
-function install(args, dryRun, { env, home: givenHome, write, out }) {
+function install(dryRun, { env, home: givenHome, write, out }) {
   const home = givenHome ?? env.HOME ?? homedir()
   const text = plist({
     node: process.execPath,
     bin: resolve(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'canopy.mjs'),
-    args,
     home,
     path: env.PATH ?? '/usr/bin:/bin',
     logFile: logPath(home),
-    config: env.CAMBIUM_CONFIG,
+    forest: env.OAKGREEN_FOREST_CONFIG_PATH,
   })
   const target = plistPath(home)
   if (dryRun) {
@@ -196,6 +197,6 @@ function install(args, dryRun, { env, home: givenHome, write, out }) {
     })
   put(target, text)
   if (!write) mkdirSync(dirname(logPath(home)), { recursive: true })
-  out(`wrote ${target}${args.length ? ` (serving with ${args.join(' ')})` : ''}\nstart it: oakgreen start canopy\n`)
+  out(`wrote ${target}\nstart it: oakgreen start canopy (settings: forest.json's "canopy" section)\n`)
   return 0
 }

@@ -15,21 +15,23 @@ Package: `@oakgreencc/canopy`. Node ≥ 22, no runtime dependencies. GitHub is r
 | Command                              | Behaviour                                                                                                                                           |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `canopy [flags]`                     | Serves the page in the foreground.                                                                                                                  |
-| `canopy install [flags] [--dry-run]` | Writes `~/Library/LaunchAgents/com.oakgreencc.canopy.plist`, serving with the given flags. `--dry-run` prints it. Log: `~/.canopy/logs/canopy.log`. |
+| `canopy install [--dry-run]`         | Writes `~/Library/LaunchAgents/com.oakgreencc.canopy.plist`. Takes no serve flags (exit 2); settings come from `forest.json`. `--dry-run` prints it. Log: `~/.oakgreen/canopy/logs/canopy.log`. |
 
 ## Flags
+
+Each flag may instead be set in the `canopy` section of `~/.oakgreen/forest.json` (`port`, `host`, `state`, `queues`, `traces`, `logs`, `intake`, `repos`, `cache`, `graft`). A flag wins over the environment, which wins over `forest.json`. "cambium's" below means the `cambium` section. With no `cambium` section while `~/.cambium` or `~/.canopy` is still there, canopy exits 2 and names `oakgreen config migrate`.
 
 | Flag                  | Default                                                                                         |
 | --------------------- | ----------------------------------------------------------------------------------------------- |
 | `--port <n>`          | `4317`                                                                                          |
 | `--host <addr>`       | `127.0.0.1`                                                                                     |
-| `--state <file>`      | cambium config's `paths.heartbeat` (or `<paths.home>/state.json`), else `~/.cambium/state.json` |
-| `--queues <file>`     | cambium config's `paths.queues` (or `<paths.home>/queues.json`), else `~/.cambium/queues.json`  |
-| `--traces <file>`     | `<paths.home>/otel/traces.jsonl` from the cambium config, else `~/.cambium/otel/traces.jsonl`   |
-| `--logs <dir>`        | `paths.logs` from the cambium config (or `<paths.home>/logs`), else `~/.cambium/logs`           |
-| `--intake <file>`     | `$MYCELIUM_STATUS`, else `~/.mycelium/status.json`                                              |
-| `--config <file>`     | `$CAMBIUM_CONFIG`, else `~/.cambium/config.json`                                                |
-| `--repo <owner/name>` | Repeatable. Else the config's `repos[].slug`, else the heartbeat's repos.                       |
+| `--state <file>`      | cambium's `paths.heartbeat` (or `<paths.home>/state.json`), else `~/.oakgreen/cambium/state.json` |
+| `--queues <file>`     | cambium's `paths.queues` (or `<paths.home>/queues.json`), else `~/.oakgreen/cambium/queues.json`  |
+| `--traces <file>`     | `<paths.home>/otel/traces.jsonl` from cambium's section, else `~/.oakgreen/cambium/otel/traces.jsonl`   |
+| `--logs <dir>`        | `paths.logs` from cambium's section (or `<paths.home>/logs`), else `~/.oakgreen/cambium/logs`           |
+| `--intake <file>`     | `$MYCELIUM_STATUS`, else mycelium's `status`, else `~/.oakgreen/mycelium/status.json`                    |
+| `--config <file>`     | `forest.json`: `$OAKGREEN_FOREST_CONFIG_PATH`, else `~/.oakgreen/forest.json`                    |
+| `--repo <owner/name>` | Repeatable. Else cambium's `repos[].slug`, else the heartbeat's repos.                       |
 | `--cache <seconds>`   | `60`; minimum `15`. Applies to GitHub reads only.                                               |
 | `--graft <cmd>`       | `graft`                                                                                         |
 
@@ -152,7 +154,7 @@ Only `GET` and `HEAD` are answered, and only for a loopback `Host` (or the `--ho
 | Heartbeat      | cambium's `state.json`, schema [`version: 1`](/reference/cambium/heartbeat/). Any other version is reported, not parsed.                                                              |
 | Traces         | The local collector's OTLP/JSON file and rotated backups (`traces-<time>.jsonl`), newest first, up to 64 MB. Re-parsed only when size or mtime changes.                               |
 | Intake         | mycelium's status file, schema `version: 1`. Any other version is reported, not parsed.                                                                                               |
-| Session briefs | `<paths.home>/briefs/` from the cambium config, else `~/.cambium/briefs/`. Checked for each `q:human` item on every `/api/state`.                                                     |
+| Session briefs | `<paths.home>/briefs/` from cambium's section, else `~/.oakgreen/cambium/briefs/`. Checked for each `q:human` item on every `/api/state`.                                                     |
 | Queues         | cambium's [queue view](#queue-view). Else GitHub labels, through `graft graphql`, each repository's answer cached for `--cache` seconds; a failed refresh keeps the last good answer. |
 | Issue pane     | GitHub, through `graft graphql`, cached per issue for `--cache` seconds.                                                                                                              |
 

@@ -10,7 +10,7 @@ Runtime dependencies: `zod` (the [graph module](#graph-module-preview)) and Open
 
 ```sh
 npm install -g @oakgreencc/cambium @oakgreencc/graft
-mkdir -p ~/.cambium && $EDITOR ~/.cambium/config.json   # see Configuration
+mkdir -p ~/.oakgreen && $EDITOR ~/.oakgreen/forest.json   # the "cambium" section; see Configuration
 cambium start --once          # one tick in the foreground
 cambium install               # writes ~/Library/LaunchAgents/com.oakgreencc.cambium.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.oakgreencc.cambium.plist
@@ -37,7 +37,7 @@ cambium status
 | `cambium install [--dry-run]`                                                          | Write the launchd agent (`KeepAlive`, `RunAtLoad`) for `start --config <this config>`; `--dry-run` prints it. It does not call `launchctl`; it prints the command.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `cambium update [--check] [--version <v>]`                                             | Install the latest version (or `<v>`, even an older one) from npm into this global install, then SIGTERM the launchd agent so it finishes its tick and KeepAlive starts the new version. `--check` only reports. No config file needed. See [Self-update](#self-update).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
-Every command takes `--config <file>`; the default is `$CAMBIUM_CONFIG`, then `~/.cambium/config.json`.
+Every command takes `--config <file>`: the `forest.json` whose `cambium` section is the config. The default is `$OAKGREEN_FOREST_CONFIG_PATH`, then `~/.oakgreen/forest.json`. Without the section and with an old `~/.cambium` still there, cambium exits 1 and names `oakgreen config migrate`.
 
 ## One tick
 
@@ -109,7 +109,7 @@ A brief holds the title, link, body (first 4,000 characters) and acceptance chec
 
 ## Configuration
 
-One JSON file. Everything but `repos` is optional; these are the defaults:
+The `cambium` section of `~/.oakgreen/forest.json` (oakgreen's [Machine layout](../oakgreen/README.md#machine-layout); `--config` or `$OAKGREEN_FOREST_CONFIG_PATH` names another file). Secrets never go there: they go in `~/.oakgreen/env`. Everything but `repos` is optional; these are the section's defaults:
 
 ```json
 {
@@ -151,12 +151,12 @@ One JSON file. Everything but `repos` is optional; these are the defaults:
     "causeRepo": null
   },
   "paths": {
-    "home": "~/.cambium",
-    "db": "~/.cambium/cambium.db",
-    "heartbeat": "~/.cambium/state.json",
-    "queues": "~/.cambium/queues.json",
-    "snapshots": "~/.cambium/snapshots.json",
-    "logs": "~/.cambium/logs"
+    "home": "~/.oakgreen/cambium",
+    "db": "~/.oakgreen/cambium/cambium.db",
+    "heartbeat": "~/.oakgreen/cambium/state.json",
+    "queues": "~/.oakgreen/cambium/queues.json",
+    "snapshots": "~/.oakgreen/cambium/snapshots.json",
+    "logs": "~/.oakgreen/cambium/logs"
   },
   "logs": { "keepPerIssue": 20, "daemonMaxBytes": 10485760 },
   "graft": { "command": "graft", "app": null, "botLogin": null },
@@ -171,7 +171,7 @@ One JSON file. Everything but `repos` is optional; these are the defaults:
 - `costFlagUsd`: an open issue whose task-phase cost is over this many US dollars with no merged PR closing it is `flagged` in the heartbeat; canopy lists it in the Inbox as a session candidate. `0` turns the flag off.
 - `worker.env` is extra environment for every worker (string values only), e.g. Claude Code's own telemetry ([Tracing](#claude-codes-own-spans-under-the-worker)).
 
-- The daemon re-reads the file before every tick, so caps, limits, `tickSeconds`, `repos`, priority labels, `release` and `worker` take effect without a restart (logged as `config reloaded: <keys>`). `host`, `engine`, `paths`, `logs` and `graft` are baked in at start: a change to them logs `restart cambium to apply` once and is not applied. A file that does not load, or has no `repos`, keeps the running config and logs one warning until it is fixed.
+- The daemon re-reads `forest.json` before every tick, so caps, limits, `tickSeconds`, `repos`, priority labels, `release` and `worker` take effect without a restart (logged as `config reloaded: <keys>`). `host`, `engine`, `paths`, `logs` and `graft` are baked in at start: a change to them logs `restart cambium to apply` once and is not applied. A file that does not load, or has no `repos`, keeps the running config and logs one warning until it is fixed.
 - `repos[].path` is a local clone; worktrees are added from it and `graft` runs in it.
 - `graft.app` is the App cambium acts as (`GRAFT_APP` for its own `graft` calls); `worker.graftApp` the one workers act as. Neither leaks into the other.
 - `merge` (top level, or per repo in `repos[]`): who merges a Task PR. See [The PR graph](#the-pr-graph).
@@ -261,13 +261,13 @@ cambium updates itself only when it is a **global npm install** (`<prefix>/lib/n
 
 ## Snapshots (`snapshots.json`)
 
-Every tick, after the queue view and before the heartbeat (paused too), cambium writes each repo's full snapshot, as the tick left it (src/snapshot-file.mjs), to `paths.snapshots` (default `~/.cambium/snapshots.json`), whole and renamed into place: `{ version: 1, writtenAt, tickSeconds, repos: [{ slug, ok, error, fetchedAt, snapshot }] }`. `snapshot` is the `Snapshot` `github.read` returned, `issues` as an array; `fetchedAt` is when the tick started (no later than the read). A repo not read this tick has `ok: false`, its error and `snapshot: null`.
+Every tick, after the queue view and before the heartbeat (paused too), cambium writes each repo's full snapshot, as the tick left it (src/snapshot-file.mjs), to `paths.snapshots` (default `~/.oakgreen/cambium/snapshots.json`), whole and renamed into place: `{ version: 1, writtenAt, tickSeconds, repos: [{ slug, ok, error, fetchedAt, snapshot }] }`. `snapshot` is the `Snapshot` `github.read` returned, `issues` as an array; `fetchedAt` is when the tick started (no later than the read). A repo not read this tick has `ok: false`, its error and `snapshot: null`.
 
 `cambium run task|pr|dispatch --follow` reads it while the heartbeat is fresh (at most 3 ticks old), so a follower costs no GraphQL budget: its first turn takes the latest snapshot, and each later turn polls every 2 s for one whose `fetchedAt` is after its last turn ended. With no heartbeat, a stale one, a missing, unreadable or other-version file, or a repo the daemon has not read for 3 ticks, it reads GitHub itself every `tickSeconds`, as before. A run without `--follow` always reads GitHub.
 
 ## Queue view (`queues.json`)
 
-Every tick, after the other steps and before the heartbeat (paused too; nothing goes to GitHub), cambium writes canopy's board, built from the tick's snapshots (src/queue-view.mjs), to `paths.queues` (default `~/.cambium/queues.json`), whole and renamed into place. canopy reads it instead of querying GitHub and falls back to GitHub once it is older than 3 ticks. For it, the snapshot also reads each PR's title, draft flag, merge-queue entry, size and check counts by state, each issue's `updatedAt` and its blockers' titles, and the 50 most recently closed unmerged PRs with the issues they would have closed.
+Every tick, after the other steps and before the heartbeat (paused too; nothing goes to GitHub), cambium writes canopy's board, built from the tick's snapshots (src/queue-view.mjs), to `paths.queues` (default `~/.oakgreen/cambium/queues.json`), whole and renamed into place. canopy reads it instead of querying GitHub and falls back to GitHub once it is older than 3 ticks. For it, the snapshot also reads each PR's title, draft flag, merge-queue entry, size and check counts by state, each issue's `updatedAt` and its blockers' titles, and the 50 most recently closed unmerged PRs with the issues they would have closed.
 
 ```jsonc
 {
@@ -306,7 +306,7 @@ Items and PRs have canopy's shapes (canopy's README, `/api/state`). An item labe
 
 ## Heartbeat (`state.json`)
 
-Written at the end of every tick to `paths.heartbeat` (default `~/.cambium/state.json`), whole and renamed into place, so a reader never sees a partial file. canopy reads it. `version` changes only on an incompatible change. All times are ISO 8601 UTC strings; durations are milliseconds.
+Written at the end of every tick to `paths.heartbeat` (default `~/.oakgreen/cambium/state.json`), whole and renamed into place, so a reader never sees a partial file. canopy reads it. `version` changes only on an incompatible change. All times are ISO 8601 UTC strings; durations are milliseconds.
 
 ```jsonc
 {
@@ -361,7 +361,7 @@ Written at the end of every tick to `paths.heartbeat` (default `~/.cambium/state
       "elapsedMs": 1260000,
       "wallClockMs": 3600000,
       "killedReason": null, // set once killed, until the transition is written
-      "logs": { "stdout": "/Users/me/.cambium/logs/…/a2-….out.log", "stderr": "…err.log" }
+      "logs": { "stdout": "/Users/me/.oakgreen/cambium/logs/…/a2-….out.log", "stderr": "…err.log" }
     }
   ],
   "events": [
@@ -966,7 +966,7 @@ Confirmed against a live run: see [Claude Code's own spans under the worker](#cl
 
 ### Local collector
 
-[`otel/`](otel/) holds an [otelcol-contrib](https://github.com/open-telemetry/opentelemetry-collector-releases/releases) config (OTLP/HTTP on `127.0.0.1:4318` → `~/.cambium/otel/{traces,metrics}.jsonl` + Jaeger) and a launchd agent, `com.oakgreencc.otelcol`. Nothing here loads it.
+[`otel/`](otel/) holds an [otelcol-contrib](https://github.com/open-telemetry/opentelemetry-collector-releases/releases) config (OTLP/HTTP on `127.0.0.1:4318` → `~/.oakgreen/cambium/otel/{traces,metrics}.jsonl` + Jaeger) and a launchd agent, `com.oakgreencc.otelcol`. Nothing here loads it.
 
 ```sh
 # 1. otelcol-contrib on PATH (darwin_arm64 release tarball; or darwin_amd64)
@@ -975,9 +975,9 @@ curl -fsSLO https://github.com/open-telemetry/opentelemetry-collector-releases/r
 tar -xzf otelcol-contrib_${V}_darwin_arm64.tar.gz otelcol-contrib && mv otelcol-contrib /opt/homebrew/bin/
 
 # 2. config + agent
-mkdir -p ~/.cambium/otel
-cp otel/otelcol.yaml ~/.cambium/otel/otelcol.yaml
-otelcol-contrib validate --config ~/.cambium/otel/otelcol.yaml
+mkdir -p ~/.oakgreen/cambium/otel ~/.oakgreen/cambium/logs
+cp otel/otelcol.yaml ~/.oakgreen/cambium/otel/otelcol.yaml
+otelcol-contrib validate --config ~/.oakgreen/cambium/otel/otelcol.yaml
 cp otel/com.oakgreencc.otelcol.plist ~/Library/LaunchAgents/
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.oakgreencc.otelcol.plist
 

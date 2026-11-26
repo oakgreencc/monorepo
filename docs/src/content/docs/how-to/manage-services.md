@@ -33,30 +33,35 @@ cambium resume
 
 ## Serve canopy on another port
 
+1. In `~/.oakgreen/forest.json`, set the port in the `canopy` section:
+
+   ```json
+   { "canopy": { "port": 4400 } }
+   ```
+
+2. `oakgreen restart canopy`.
+
+Any other canopy flag goes in the same section.
+
+## Use a forest.json outside the default path
+
+Set `OAKGREEN_FOREST_CONFIG_PATH` before the agents are written, so they carry it:
+
 ```sh
-canopy install --port 4400
-oakgreen reload canopy
-```
-
-`canopy install --dry-run` prints the agent first. The same applies to any other canopy flag.
-
-## Use a cambium config outside the default path
-
-`oakgreen start` installs cambium's agent without `--config`. Write the agent yourself first:
-
-```sh
-cambium install --config ~/path/config.json
-oakgreen start cambium
+export OAKGREEN_FOREST_CONFIG_PATH=~/path/forest.json
+cambium install --config "$OAKGREEN_FOREST_CONFIG_PATH"
+oakgreen start
 ```
 
 ## Find the logs
 
 | Service | Log |
 | --- | --- |
-| cambium | `~/.cambium/logs/cambium.log`, launchd errors in `~/.cambium/logs/cambium.launchd.err.log` |
-| cambium workers | `~/.cambium/logs/<owner>__<name>/issue-<n>/` |
-| mycelium | `~/.mycelium/logs/mycelium.log` |
-| canopy | `~/.canopy/logs/canopy.log` |
-| otelcol | `~/.cambium/otel/otelcol.log` |
+| cambium | `~/.oakgreen/cambium/logs/cambium.log`, launchd errors in `~/.oakgreen/cambium/logs/cambium.launchd.err.log` |
+| cambium workers | `~/.oakgreen/cambium/logs/<owner>__<name>/issue-<n>/` |
+| mycelium | `~/.oakgreen/mycelium/logs/mycelium.log` |
+| canopy | `~/.oakgreen/canopy/logs/canopy.log` |
+| otelcol | `~/.oakgreen/cambium/logs/otelcol.log` |
+| proxy | `~/.oakgreen/proxy/logs/proxy.log` |
 
 Every command and flag: [oakgreen CLI](/reference/oakgreen-cli/).

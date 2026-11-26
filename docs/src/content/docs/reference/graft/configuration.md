@@ -11,7 +11,9 @@ The project policy is `.graft.json` at the repository root, or the same object u
 
 With the `package.json` form, graft protects the `"graft"` key, not the whole file. GitHub cannot enforce a key, so `graft doctor` warns unless CODEOWNERS also owns `/package.json`.
 
-Legacy names are still read: `.agit.json`, the `"agit"` key, `AGIT_*` variables, `~/.config/agit`.
+Legacy names are still read: `.agit.json`, the `"agit"` key, `AGIT_*` variables.
+
+The machine settings (which App acts for which owner) are the `graft` section of `~/.oakgreen/forest.json` (`$OAKGREEN_FOREST_CONFIG_PATH` names another file): `defaultApp`, and `owners`, a map of lowercased owner login to App slug. `graft setup app` writes it. Without `$GRAFT_HOME`, no `graft` section while `~/.config/graft` is still there makes graft refuse and name `oakgreen config migrate`.
 
 ## Fields
 
@@ -60,11 +62,12 @@ Whatever CODEOWNERS says, these are protected: `.graft.json` (or the `"graft"` k
 | State | Location | Tracked |
 | --- | --- | --- |
 | Project policy | `.graft.json` | yes |
+| Machine settings (`defaultApp`, `owners`) | `graft` section of `~/.oakgreen/forest.json` | no |
 | Protected paths | CODEOWNERS | yes |
-| App identity and private key | `~/.config/graft/apps/<slug>/` (mode 0600) | no |
-| Token cache | `~/.config/graft/cache/` (mode 0600) | no |
-| REST answer cache (by ETag) | `~/.config/graft/cache/http/`; entries unused for 7 days are pruned | no |
-| Rulesets written for manual import | `~/.config/graft/rulesets/<owner>-<repo>-<base>.json` | no |
+| App identity and private key | `$GRAFT_HOME/apps/<slug>/`, default `~/.oakgreen/graft/apps/<slug>/` (mode 0600, directory 0700) | no |
+| Token cache | `~/.oakgreen/graft/cache/` (mode 0600) | no |
+| REST answer cache (by ETag) | `~/.oakgreen/graft/cache/http/`; entries unused for 7 days are pruned | no |
+| Rulesets written for manual import | `~/.oakgreen/graft/rulesets/<owner>-<repo>-<base>.json` | no |
 | Maintainer grants (`maintainer/<session>.json`) and log (`maintainer.log`) | `<git-common-dir>/graft/` | no, shared by a clone's worktrees |
 | Validation receipt | `<git-dir>/graft/validated-base.json` | no, per worktree |
 
@@ -73,4 +76,6 @@ Whatever CODEOWNERS says, these are protected: `.graft.json` (or the `"graft"` k
 | Variable | Meaning |
 | --- | --- |
 | `GRAFT_APP` | App slug to act as, overriding the owner mapping. |
+| `GRAFT_HOME` | Where App keys and caches live. Default `~/.oakgreen/graft`. |
+| `OAKGREEN_FOREST_CONFIG_PATH` | The `forest.json` holding the machine settings. Default `~/.oakgreen/forest.json`. |
 | `GRAFT_HTTP_CACHE` | `0` turns the REST answer cache off. With it on, a repeated GET asks GitHub only whether the answer changed; an unchanged answer is served from the cache and costs no rate limit. |

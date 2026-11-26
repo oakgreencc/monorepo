@@ -12,7 +12,7 @@
  *      `POST /app-manifests/{code}/conversions` turns into the App's id and
  *      private key;
  *   4. those land in `$GRAFT_HOME/apps/<slug>/` — the key 0600, the directory
- *      0700 — and the owner is mapped to the App in `$GRAFT_HOME/config.json`;
+ *      0700 — and the owner is mapped to the App in forest.json's `graft` section;
  *   5. the human installs it on the repositories it may touch, and this waits
  *      until GitHub reports an installation.
  *
@@ -35,6 +35,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { graftHome, loadUserConfig } from '../config.mjs'
+import { forestPath, writeSection } from '../forest.mjs'
 import { contextOptions } from '../cli/common.mjs'
 import { flag, has, resolveContext } from '../context.mjs'
 import { appDir, asApp, request } from '../github/app.mjs'
@@ -131,7 +132,7 @@ export async function convertManifest({ code, fetch = globalThis.fetch }) {
 
 /**
  * Write an App's credentials into `$GRAFT_HOME/apps/<slug>/` and map its owner
- * to it in `$GRAFT_HOME/config.json`. Secrets graft does not use are dropped.
+ * to it in forest.json's `graft` section. Secrets graft does not use are dropped.
  *
  * @param {{ app: { id: number | string, slug: string, pem: string, owner?: { login?: string } | null, client_id?: string, html_url?: string, created_at?: string }, owner?: string, env?: NodeJS.ProcessEnv }} input
  * @returns {{ dir: string, owner: string | null, madeDefault: boolean }}
@@ -157,13 +158,12 @@ export function saveApp({ app, owner, env = process.env }) {
   writeFileSync(pem, app.pem.endsWith('\n') ? app.pem : `${app.pem}\n`, { mode: 0o600 })
   chmodSync(pem, 0o600) // writeFileSync's mode applies only on create
 
-  const cfgPath = join(home, 'config.json')
-  const cfg = loadUserConfig(env)
-  cfg.owners = cfg.owners ?? {}
+  const cfg = { ...loadUserConfig(env) }
+  cfg.owners = { ...(cfg.owners ?? {}) }
   if (login) cfg.owners[login.toLowerCase()] = app.slug
   const madeDefault = !cfg.defaultApp
   if (madeDefault) cfg.defaultApp = app.slug
-  writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`, { mode: 0o600 })
+  writeSection(forestPath(undefined, { env }), 'graft', cfg)
   return { dir, owner: login, madeDefault }
 }
 

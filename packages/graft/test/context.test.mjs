@@ -117,8 +117,8 @@ function graftHome(root) {
     writeFileSync(join(home, 'apps', slug, 'app.json'), JSON.stringify({ id }))
     writeFileSync(join(home, 'apps', slug, 'private-key.pem'), 'not a real key')
   }
-  writeFileSync(join(home, 'config.json'), JSON.stringify({ owners: { acme: 'by-owner' } }))
-  return { GRAFT_HOME: home }
+  writeFileSync(join(home, 'forest.json'), JSON.stringify({ graft: { owners: { acme: 'by-owner' } } }))
+  return { GRAFT_HOME: home, OAKGREEN_FOREST_CONFIG_PATH: join(home, 'forest.json') }
 }
 
 test("credential helper: the project's app pin chooses the App for its own repository only", async (t) => {

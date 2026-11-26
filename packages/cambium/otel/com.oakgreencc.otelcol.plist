@@ -4,7 +4,8 @@
   The local OpenTelemetry collector as a launchd user agent. Not loaded by
   anything in this repo: copy it to ~/Library/LaunchAgents and bootstrap it
   yourself (see ../README.md#tracing). It reads
-  ~/.cambium/otel/otelcol.yaml and logs to ~/.cambium/otel/otelcol.log.
+  ~/.oakgreen/cambium/otel/otelcol.yaml and logs to
+  ~/.oakgreen/cambium/logs/otelcol.log.
 -->
 <plist version="1.0">
 <dict>
@@ -14,7 +15,7 @@
   <array>
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>exec otelcol-contrib --config "$HOME/.cambium/otel/otelcol.yaml" &gt;&gt;"$HOME/.cambium/otel/otelcol.log" 2&gt;&amp;1</string>
+    <string>exec otelcol-contrib --config "$HOME/.oakgreen/cambium/otel/otelcol.yaml" &gt;&gt;"$HOME/.oakgreen/cambium/logs/otelcol.log" 2&gt;&amp;1</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>

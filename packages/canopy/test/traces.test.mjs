@@ -324,11 +324,11 @@ test('/api/state carries the trace index; /api/traces lists; /api/traces/<id> de
 
 test('resolveSettings: --traces, else <paths.home>/otel/traces.jsonl', () => {
   const read = (/** @type {string} */ p) => {
-    if (p === '/c/home.json') return JSON.stringify({ paths: { home: '/srv/cambium' } })
+    if (p === '/c/home.json') return JSON.stringify({ cambium: { paths: { home: '/srv/cambium' } } })
     throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
   }
   const deps = { home: '/home/me', read, env: {} }
-  assert.equal(resolveSettings({}, deps).tracesPath, '/home/me/.cambium/otel/traces.jsonl')
+  assert.equal(resolveSettings({}, deps).tracesPath, '/home/me/.oakgreen/cambium/otel/traces.jsonl')
   assert.equal(resolveSettings({ config: '/c/home.json' }, deps).tracesPath, '/srv/cambium/otel/traces.jsonl')
   assert.equal(resolveSettings({ traces: '~/t.jsonl' }, deps).tracesPath, '/home/me/t.jsonl')
 })

@@ -1,6 +1,6 @@
 ---
 title: oakgreen CLI
-description: Commands, services, doctor checks and setup steps of the oakgreen umbrella CLI.
+description: Commands, machine layout, services, doctor checks and setup steps of the oakgreen umbrella CLI.
 sidebar:
   order: 1
 ---
@@ -19,9 +19,56 @@ sidebar:
 | `oakgreen stop [service...]` | Disables and unloads each, in reverse order. Stays stopped across logins until `start`. |
 | `oakgreen restart [service...]` | A new process for each, on the same agent definition. Default: every installed service. |
 | `oakgreen reload [service...]` | Re-reads each agent's plist (environment, program), then starts it. |
+| `oakgreen config migrate [--dry-run]` | Moves this machine's old per-service files into `~/.oakgreen` ([migration](#migration)). `--dry-run` prints the plan and changes nothing. |
 | `oakgreen update [--check]` | Installs the latest oakgreen and its tools, restarts running services, then runs `oakgreen doctor`. `--check` only reports. |
 
-`--config` is cambium's config file. Default: `$CAMBIUM_CONFIG`, then `~/.cambium/config.json`.
+`--config` is `forest.json`, the stack's config file. Default: `$OAKGREEN_FOREST_CONFIG_PATH`, then `~/.oakgreen/forest.json`.
+
+## Machine layout
+
+| Path | Holds |
+| --- | --- |
+| `~/.oakgreen/forest.json` | Config, one section per service: `cambium`, `mycelium`, `canopy`, `graft`, `proxy`. No secrets. |
+| `~/.oakgreen/env` | Secrets, `KEY=value`, mode 600. |
+| `~/.oakgreen/<service>/` | The service's state, e.g. `cambium/cambium.db`, `cambium/otel/traces.jsonl`, `mycelium/status.json`. |
+| `~/.oakgreen/<service>/logs/` | The service's logs. |
+| `~/.oakgreen/graft/apps/<slug>/` | graft's App keys, mode 600. |
+
+- `$OAKGREEN_FOREST_CONFIG_PATH` names another `forest.json` for every service.
+- Precedence in every service: flag, then environment variable, then `forest.json`, then default.
+- cambium re-reads `forest.json` every tick. canopy, mycelium and the proxy read it at start.
+- A service that finds its pre-forest files and no section of its own exits non-zero, naming `oakgreen config migrate`.
+
+```json
+{
+  "cambium": { "repos": [{ "slug": "owner/name", "path": "~/src/name" }] },
+  "mycelium": { "repo": "owner/name" },
+  "canopy": { "port": 4317 },
+  "graft": { "defaultApp": "you-agents", "owners": { "you": "you-agents" } },
+  "proxy": { "routes": { "grafana": 3000 } }
+}
+```
+
+### Migration
+
+`oakgreen config migrate` moves these:
+
+| Old | New |
+| --- | --- |
+| `~/.cambium/config.json` | `forest.json` `cambium`; `paths` under `~/.cambium` follow the state |
+| `~/.cambium/*` | `~/.oakgreen/cambium/*` |
+| `~/.mycelium/env` | settings to `forest.json` `mycelium`; credentials and anything else to `~/.oakgreen/env` |
+| `~/.mycelium/*`, `$XDG_STATE_HOME/mycelium/*` | `~/.oakgreen/mycelium/*` |
+| flags in canopy's agent | `forest.json` `canopy` |
+| `~/.canopy/*` | `~/.oakgreen/canopy/*` |
+| `~/.config/graft/config.json` | `forest.json` `graft` |
+| `~/.config/graft/*` | `~/.oakgreen/graft/*` |
+| `~/.oakgreen/proxy.json` | `forest.json` `proxy` |
+| `~/.oakgreen/logs/*` | `~/.oakgreen/proxy/logs/*` |
+
+- Files move by rename; their contents do not change.
+- The otelcol config and agent are rewritten to the new paths. Other agents naming an old path are removed; `oakgreen start` writes them again.
+- Exit 1, nothing changed: `forest.json` already has a section it would fold, a destination exists, or launchd has a service loaded whose files would move. The message names the service.
 
 ### Tool resolution
 
@@ -47,7 +94,7 @@ launchd user agents, macOS only. Handled in this order:
 
 - With no names, every service is handled and an uninstalled one is skipped. A named service that is not installed fails.
 - Each command waits up to 3 minutes per process. Exit 1 if any did not come up.
-- `start` installs canopy with its default flags.
+- canopy's agent carries no flags; canopy reads the `canopy` section of `forest.json`.
 
 ## Update
 
@@ -68,7 +115,10 @@ launchd user agents, macOS only. Handled in this order:
 | `node` | `process.versions.node` satisfies oakgreen's `engines.node` | yes |
 | `graft doctor` | `graft doctor` exits 0 (its last line is shown) | yes |
 | `claude on PATH` | a `claude` executable is on `PATH` | yes |
-| `cambium config` | the config file exists and parses | yes |
+| `forest.json` | the file exists and is a JSON object | yes |
+| `env file` | `~/.oakgreen/env` is mode 600, or absent | yes |
+| `old paths` | no pre-forest file is left; fix: `oakgreen config migrate` | yes |
+| `cambium config` | `forest.json` has a `cambium` section | yes |
 | `cambium status` | `cambium status --json --config <file>` exits 0 and reports a heartbeat. Not run without a config. | yes |
 | `cambium heartbeat` | the heartbeat's `tick.finishedAt` is within 3 × `daemon.tickSeconds` | yes |
 | `queue labels <repo>` | every [queue label](/reference/cambium/labels-and-state/) exists on the repository | yes |
@@ -79,7 +129,7 @@ launchd user agents, macOS only. Handled in this order:
 
 Repositories checked: `--repo`, else every `repos[].slug` in the cambium config, else `$MYCELIUM_REPO`.
 
-Heartbeat file: `paths.heartbeat`, else `<paths.home>/state.json`, else `~/.cambium/state.json`.
+Heartbeat file: `paths.heartbeat`, else `<paths.home>/state.json`, else `~/.oakgreen/cambium/state.json`.
 
 Queue labels checked: `q:intake q:task q:human q:promote running why:budget why:reject why:approve why:triage why:rescue ask:decide ask:verify ask:chore ask:approve ask:session wait:deferred wait:blocked red-base rescue`.
 
@@ -87,7 +137,7 @@ Queue labels checked: `q:intake q:task q:human q:promote running why:budget why:
 
 `oakgreen setup` runs these in order. A second run creates nothing.
 
-1. **cambium config skeleton**, if the file is absent: one repo (`--repo`, else `$MYCELIUM_REPO`, else the `origin` remote, else `OWNER/NAME`), its path the current git root. An existing file is never touched.
+1. **cambium section**, if `forest.json` has none: one repo (`--repo`, else `$MYCELIUM_REPO`, else the `origin` remote, else `OWNER/NAME`), its path the current git root. Other sections are kept. An existing section, or a `forest.json` that does not parse, is never touched. Also creates an empty `~/.oakgreen/env`, mode 600, if absent.
 2. **Queue labels**: each missing one, on each configured repository, through `graft api POST /repos/<repo>/labels`.
 3. **Label guide**, when run from a clone of a configured repository: writes `docs/agents/triage-labels.md` if absent, and adds a `### Triage labels` pointer under `## Agent skills` in `CLAUDE.md` (else `AGENTS.md`), once. An existing guide is never rewritten; one that does not name `q:intake` is reported.
-4. **Human steps**, printed: create and install the GitHub Apps (`graft setup app`), fill in `graft.app`, `graft.botLogin` and `worker.graftApp`, start the services, optionally write `~/.mycelium/env`.
+4. **Human steps**, printed: create and install the GitHub Apps (`graft setup app`), fill in `cambium.graft.app`, `cambium.graft.botLogin` and `cambium.worker.graftApp` in `forest.json`, start the services, optionally set up mycelium (its `forest.json` section, credentials in `~/.oakgreen/env`).

@@ -5,6 +5,7 @@ import { test } from 'node:test'
 import { main } from '../src/cli.mjs'
 import { createIntake } from '../src/intake.mjs'
 import { runLoop } from '../src/runner.mjs'
+import { defaultStatePath } from '../src/state.mjs'
 import { createStatus, defaultStatusPath, targetOf } from '../src/status.mjs'
 import { fakeFetch, fakeGithub, fixture } from './helpers.mjs'
 
@@ -12,9 +13,11 @@ const pem = /** @type {string} */ (
   generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ type: 'pkcs8', format: 'pem' })
 )
 
-test('status path: $MYCELIUM_STATUS, else ~/.mycelium/status.json', () => {
+test('status path: $MYCELIUM_STATUS, else ~/.oakgreen/mycelium/status.json', () => {
   assert.equal(defaultStatusPath({ MYCELIUM_STATUS: '/x/s.json' }, '/h'), '/x/s.json')
-  assert.equal(defaultStatusPath({}, '/h'), '/h/.mycelium/status.json')
+  assert.equal(defaultStatusPath({}, '/h'), '/h/.oakgreen/mycelium/status.json')
+  assert.equal(defaultStatePath({}, '/h'), '/h/.oakgreen/mycelium/state.json')
+  assert.equal(defaultStatePath({ MYCELIUM_STATE: '/x/c.json' }, '/h'), '/x/c.json')
 })
 
 test('targetOf: identifiers only, never a credential', () => {
@@ -114,7 +117,7 @@ test('run writes the status file: every source listed, configured or not, and no
     out: () => {},
     err: () => {},
     writeStatus: (p, t) => {
-      assert.equal(p, '/home/u/.mycelium/status.json')
+      assert.equal(p, '/home/u/.oakgreen/mycelium/status.json')
       texts.push(t)
     },
   })

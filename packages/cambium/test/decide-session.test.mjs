@@ -46,8 +46,11 @@ const fixture = () => ({
 /** A temp cambium home, the CLI's io over a fake GitHub, and a way to feed one output. @param {any} [h] */
 function session(h = harness({ issues: [fixture()] })) {
   const home = mkdtempSync(join(tmpdir(), 'cambium-decide-'))
-  const cfg = join(home, 'config.json')
-  writeFileSync(cfg, JSON.stringify({ host: 'mac', repos: [{ slug: SLUG, path: '/repo' }], paths: { home } }))
+  const cfg = join(home, 'forest.json')
+  writeFileSync(
+    cfg,
+    JSON.stringify({ cambium: { host: 'mac', repos: [{ slug: SLUG, path: '/repo' }], paths: { home } } }),
+  )
   /** @type {string[]} */
   const out = []
   /** @type {string[]} */
@@ -56,7 +59,7 @@ function session(h = harness({ issues: [fixture()] })) {
   const io = {
     out: (/** @type {string} */ l) => out.push(l),
     err: (/** @type {string} */ l) => err.push(l),
-    env: { CAMBIUM_CONFIG: cfg, HOME: home, PATH: '/usr/bin', USER: 'james' },
+    env: { OAKGREEN_FOREST_CONFIG_PATH: cfg, HOME: home, PATH: '/usr/bin', USER: 'james' },
     deps: () => h.deps,
     now: () => T0,
     stdin: async () => stdin,
@@ -290,7 +293,10 @@ test('decide advance: "stop" as the reply abandons; the issue gets no answer', a
 test('decide: usage, an issue with no lens, and a missing output', async () => {
   const s = session(harness({ issues: [{ number: N, labels: ['q:human'] }] }))
   assert.equal(
-    await main(['decide', 'nope', REF], /** @type {any} */ ({ ...s, out: () => {}, err: () => {}, env: {} })),
+    await main(
+      ['decide', 'nope', REF],
+      /** @type {any} */ ({ ...s, out: () => {}, err: () => {}, env: { HOME: s.home } }),
+    ),
     1,
   )
   const r = await s.show()
@@ -299,7 +305,7 @@ test('decide: usage, an issue with no lens, and a missing output', async () => {
   const missing = await main(['decide', 'advance', REF], {
     out: () => {},
     err: (/** @type {string} */ l) => noOutput.err.push(l),
-    env: { CAMBIUM_CONFIG: join(noOutput.home, 'config.json') },
+    env: { OAKGREEN_FOREST_CONFIG_PATH: join(noOutput.home, 'forest.json'), HOME: noOutput.home },
     deps: () => noOutput.h.deps,
   })
   assert.equal(missing, 1)

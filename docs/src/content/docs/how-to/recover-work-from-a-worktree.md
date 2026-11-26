@@ -19,7 +19,7 @@ If the work is merged, `graft worktree done agent/my-branch` rewinds the branch 
 
 ## Find why cambium kept a worktree
 
-cambium removes a worker's worktree only when GitHub holds everything in it. Otherwise it keeps it and logs a warning with the reason in `~/.cambium/logs/cambium.log`.
+cambium removes a worker's worktree only when GitHub holds everything in it. Otherwise it keeps it and logs a warning with the reason in `~/.oakgreen/cambium/logs/cambium.log`.
 
 To see what the periodic sweep would do with every worktree:
 
@@ -32,7 +32,7 @@ cambium gc --dry-run --repo owner/name
 A worktree idle for `gc.staleDays` (14 by default) with unpublished work is archived, then removed:
 
 ```text
-~/.cambium/gc/<owner>__<name>/<dir>-<stamp>/
+~/.oakgreen/cambium/gc/<owner>__<name>/<dir>-<stamp>/
   commits.bundle    local commits not on origin/<base>
   changes.patch     uncommitted changes
   untracked/        untracked files
@@ -42,14 +42,14 @@ A worktree idle for `gc.staleDays` (14 by default) with unpublished work is arch
 1. Restore the commits into your clone:
 
    ```sh
-   git fetch ~/.cambium/gc/owner__name/<dir>-<stamp>/commits.bundle HEAD:recovered
+   git fetch ~/.oakgreen/cambium/gc/owner__name/<dir>-<stamp>/commits.bundle HEAD:recovered
    ```
 
 2. Check out `recovered`, then apply the rest:
 
    ```sh
-   git apply ~/.cambium/gc/owner__name/<dir>-<stamp>/changes.patch
-   cp -R ~/.cambium/gc/owner__name/<dir>-<stamp>/untracked/. .
+   git apply ~/.oakgreen/cambium/gc/owner__name/<dir>-<stamp>/changes.patch
+   cp -R ~/.oakgreen/cambium/gc/owner__name/<dir>-<stamp>/untracked/. .
    ```
 
 To change when the sweep runs or archives, set `gc.everyMinutes`, `gc.graceMinutes` and `gc.staleDays`: [cambium configuration](/reference/cambium/configuration/).

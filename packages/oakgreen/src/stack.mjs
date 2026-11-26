@@ -46,20 +46,24 @@ export const MYCELIUM_SOURCES = {
 /** @param {string} p @param {string} home */
 export const expandHome = (p, home) => (p === '~' ? home : p.startsWith('~/') ? join(home, p.slice(2)) : p)
 
-/** @param {{ config?: string, env: Env, home: string, cwd: string }} ctx */
-export const cambiumConfigPath = ({ config, env, home, cwd }) =>
-  resolve(cwd, expandHome(config ?? env.CAMBIUM_CONFIG ?? '~/.cambium/config.json', home))
+/** forest.json: `--config`, then `$OAKGREEN_FOREST_CONFIG_PATH`, then `~/.oakgreen/forest.json`. @param {{ config?: string, env: Env, home: string, cwd: string }} ctx */
+export const forestConfigPath = ({ config, env, home, cwd }) =>
+  resolve(cwd, expandHome(config || env.OAKGREEN_FOREST_CONFIG_PATH || '~/.oakgreen/forest.json', home))
 
 /**
+ * forest.json and its `cambium` section. `exists`: the file is there; `present`: it has the section; `error`: it does
+ * not parse, or is not an object.
  * @param {string} file
- * @returns {{ present: boolean, config: any, error: string | null }}
+ * @returns {{ exists: boolean, present: boolean, forest: Record<string, any> | null, config: any, error: string | null }}
  */
-export function readCambiumConfig(file) {
-  if (!existsSync(file)) return { present: false, config: null, error: null }
+export function readForestFile(file) {
+  if (!existsSync(file)) return { exists: false, present: false, forest: null, config: null, error: null }
   try {
-    return { present: true, config: JSON.parse(readFileSync(file, 'utf8')), error: null }
+    const forest = JSON.parse(readFileSync(file, 'utf8'))
+    if (!forest || typeof forest !== 'object' || Array.isArray(forest)) throw new Error('not a JSON object')
+    return { exists: true, present: forest.cambium !== undefined, forest, config: forest.cambium ?? null, error: null }
   } catch (err) {
-    return { present: true, config: null, error: /** @type {Error} */ (err).message }
+    return { exists: true, present: false, forest: null, config: null, error: /** @type {Error} */ (err).message }
   }
 }
 
@@ -67,7 +71,7 @@ export function readCambiumConfig(file) {
 export function heartbeatPath(config, home) {
   const paths = config?.paths ?? {}
   if (typeof paths.heartbeat === 'string') return expandHome(paths.heartbeat, home)
-  return join(expandHome(typeof paths.home === 'string' ? paths.home : '~/.cambium', home), 'state.json')
+  return join(expandHome(typeof paths.home === 'string' ? paths.home : '~/.oakgreen/cambium', home), 'state.json')
 }
 
 /**

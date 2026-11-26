@@ -14,7 +14,7 @@ It takes about thirty minutes, most of it waiting for the worker.
 - Finish [Your first Verified commit](/tutorials/first-verified-commit/). We use the same `you/sandbox` clone and App.
 - macOS (the services are launchd agents) with Node 22.13 or newer.
 - [Claude Code](https://claude.com/claude-code) installed and signed in: `claude --version` prints a version.
-- No existing `~/.cambium/config.json`.
+- No `cambium` section in `~/.oakgreen/forest.json` yet.
 
 Work from the sandbox clone throughout:
 
@@ -37,11 +37,11 @@ This installs `oakgreen` with cambium, canopy and the other tools.
 oakgreen setup --repo you/sandbox
 ```
 
-You will see it write `~/.cambium/config.json`, create the queue labels (`q:intake`, `q:task`, `q:human` and the rest) on the sandbox, and write a label guide for agents into the clone. It ends with a list of remaining steps; we do them next.
+You will see it write the `cambium` section of `~/.oakgreen/forest.json`, create the queue labels (`q:intake`, `q:task`, `q:human` and the rest) on the sandbox, and write a label guide for agents into the clone. It ends with a list of remaining steps; we do them next.
 
 ## 3. Point cambium at your App
 
-Open `~/.cambium/config.json`. Fill in the App's slug (the name `graft doctor` shows in `App credentials (…)`, here `you-agents`), turn off the base-health check because the sandbox has no CI, and allow one worker at a time:
+Open `~/.oakgreen/forest.json`. Fill in the App's slug (the name `graft doctor` shows in `App credentials (…)`, here `you-agents`), turn off the base-health check because the sandbox has no CI, and allow one worker at a time:
 
 ```json
 {

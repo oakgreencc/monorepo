@@ -1,6 +1,7 @@
 // @ts-check
-/** The launchd agent for `mycelium run`: KeepAlive restarts it whenever it exits. Settings stay in the env file. */
+/** The launchd agent for `mycelium run`: KeepAlive restarts it whenever it exits. Settings stay in forest.json and ~/.oakgreen/env. */
 import { join } from 'node:path'
+import { FOREST_PATH_ENV, serviceDir } from './forest.mjs'
 
 export const LABEL = 'com.oakgreencc.mycelium'
 
@@ -8,12 +9,13 @@ export const LABEL = 'com.oakgreencc.mycelium'
 const xml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 /**
- * @param {{ node: string, bin: string, home: string, path: string, logFile: string, envFile?: string }} o
- * `envFile` is written only when it was set explicitly (`$MYCELIUM_ENV`); otherwise the default is found again.
+ * @param {{ node: string, bin: string, home: string, path: string, logFile: string, forest?: string }} o
+ * `forest` is written only when it was set explicitly (`$OAKGREEN_FOREST_CONFIG_PATH`); otherwise the default is
+ * found again.
  */
-export function plist({ node, bin, home, path, logFile, envFile }) {
+export function plist({ node, bin, home, path, logFile, forest }) {
   const args = [node, bin, 'run'].map((a) => `    <string>${xml(a)}</string>`).join('\n')
-  const env = { PATH: path, HOME: home, ...(envFile ? { MYCELIUM_ENV: envFile } : {}) }
+  const env = { PATH: path, HOME: home, ...(forest ? { [FOREST_PATH_ENV]: forest } : {}) }
   const envXml = Object.entries(env)
     .map(([k, v]) => `    <key>${k}</key>\n    <string>${xml(v)}</string>`)
     .join('\n')
@@ -54,4 +56,4 @@ ${envXml}
 export const plistPath = (home) => join(home, 'Library', 'LaunchAgents', `${LABEL}.plist`)
 
 /** @param {string} home */
-export const logPath = (home) => join(home, '.mycelium', 'logs', 'mycelium.log')
+export const logPath = (home) => join(serviceDir('mycelium', { home }), 'logs', 'mycelium.log')

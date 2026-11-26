@@ -15,12 +15,12 @@ processors:
 
 exporters:
   file/traces:
-    path: ${env:HOME}/.cambium/otel/traces.jsonl
+    path: ${env:HOME}/.oakgreen/cambium/otel/traces.jsonl
     rotation:
       max_megabytes: 50
       max_backups: 5
   file/metrics:
-    path: ${env:HOME}/.cambium/otel/metrics.jsonl
+    path: ${env:HOME}/.oakgreen/cambium/otel/metrics.jsonl
     rotation:
       max_megabytes: 50
       max_backups: 5

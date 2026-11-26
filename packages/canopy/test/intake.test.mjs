@@ -134,11 +134,11 @@ test('intakeActivity: per source opened, commented and failed over a day and a w
   assert.equal(a.recent.find((f) => f.source === 'asc')?.failed, true)
 })
 
-test('settings: --intake, else $MYCELIUM_STATUS, else ~/.mycelium/status.json', () => {
+test('settings: --intake, else $MYCELIUM_STATUS, else ~/.oakgreen/mycelium/status.json', () => {
   const read = () => {
     throw Object.assign(new Error('x'), { code: 'ENOENT' })
   }
-  assert.equal(resolveSettings({}, { env: {}, home: '/h', read }).intakePath, '/h/.mycelium/status.json')
+  assert.equal(resolveSettings({}, { env: {}, home: '/h', read }).intakePath, '/h/.oakgreen/mycelium/status.json')
   assert.equal(resolveSettings({}, { env: { MYCELIUM_STATUS: '/s.json' }, home: '/h', read }).intakePath, '/s.json')
   assert.equal(
     resolveSettings({ intake: '/f.json' }, { env: { MYCELIUM_STATUS: '/s.json' }, home: '/h', read }).intakePath,

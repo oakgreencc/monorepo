@@ -7,7 +7,7 @@ sidebar:
 
 Triage needs the graph engine. Without it, `q:intake` issues wait untouched.
 
-1. In `~/.cambium/config.json`:
+1. In the `cambium` section of `~/.oakgreen/forest.json`:
 
    ```json
    {

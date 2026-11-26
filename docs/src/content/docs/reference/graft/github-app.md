@@ -29,7 +29,7 @@ Withheld:
 
 No webhooks. The App is private. Installation scope: only the repositories agents work in. Commits the App creates through the API show as **Verified** as `<app>[bot]`.
 
-Key storage: `~/.config/graft/apps/<slug>/`.
+Key storage: `~/.oakgreen/graft/apps/<slug>/`.
 
 ## Base-branch ruleset
 
@@ -45,7 +45,7 @@ Name: `graft: <base>`. Created, or extended with missing rules, by `graft setup 
 
 Bypass: repository admins, through pull requests only. The App is never on the bypass list.
 
-Without `gh` logged in as a repository admin, the ruleset is written to `~/.config/graft/rulesets/<owner>-<repo>-<base>.json` for import at Settings → Rules → New ruleset → Import a ruleset.
+Without `gh` logged in as a repository admin, the ruleset is written to `~/.oakgreen/graft/rulesets/<owner>-<repo>-<base>.json` for import at Settings → Rules → New ruleset → Import a ruleset.
 
 ## App-branches ruleset (optional)
 

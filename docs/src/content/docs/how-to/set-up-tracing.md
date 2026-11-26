@@ -20,9 +20,9 @@ Only graph runs are traced, so set `"engine": "graph"` in the cambium config. Th
 3. Install the config and the agent, then start it:
 
    ```sh
-   mkdir -p ~/.cambium/otel
-   cp "$OTEL_DIR/otelcol.yaml" ~/.cambium/otel/otelcol.yaml
-   otelcol-contrib validate --config ~/.cambium/otel/otelcol.yaml
+   mkdir -p ~/.oakgreen/cambium/otel ~/.oakgreen/cambium/logs
+   cp "$OTEL_DIR/otelcol.yaml" ~/.oakgreen/cambium/otel/otelcol.yaml
+   otelcol-contrib validate --config ~/.oakgreen/cambium/otel/otelcol.yaml
    cp "$OTEL_DIR/com.oakgreencc.otelcol.plist" ~/Library/LaunchAgents/
    oakgreen start otelcol
    ```
@@ -47,11 +47,11 @@ oakgreen reload cambium
 
 `cambium install` rewrites the plist without these. Repeat this step after any reinstall. `cambium update` leaves the plist alone.
 
-Check: `~/.cambium/otel/traces.jsonl` grows after the next graph run, and canopy's **Traces** tab lists it.
+Check: `~/.oakgreen/cambium/otel/traces.jsonl` grows after the next graph run, and canopy's **Traces** tab lists it.
 
 ## Point mycelium at it
 
-Add `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` to `~/.mycelium/env`, then `oakgreen restart mycelium`. Issues it files then start their trace.
+Add `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` to `~/.oakgreen/env`, then `oakgreen restart mycelium`. Issues it files then start their trace.
 
 ## Add Jaeger
 
@@ -63,9 +63,9 @@ The UI is on `http://127.0.0.1:16686`. Without Jaeger, the collector still write
 
 ## Send to AWS instead
 
-1. Copy `otelcol-aws.yaml` from `$OTEL_DIR` to `~/.cambium/otel/otelcol.yaml` and set the region and workspace in it.
+1. Copy `otelcol-aws.yaml` from `$OTEL_DIR` to `~/.oakgreen/cambium/otel/otelcol.yaml` and set the region and workspace in it.
 2. Enable X-Ray Transaction Search in the region, and give the collector's process AWS credentials through the default chain (for example a profile in `~/.aws`).
-3. `oakgreen restart otelcol`, then check `~/.cambium/otel/otelcol.log` for export errors.
+3. `oakgreen restart otelcol`, then check `~/.oakgreen/cambium/logs/otelcol.log` for export errors.
 
 cambium's environment stays the same.
 

@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-Written at the end of every tick to `paths.heartbeat` (default `~/.cambium/state.json`), whole and renamed into place. canopy and `oakgreen doctor` read it.
+Written at the end of every tick to `paths.heartbeat` (default `~/.oakgreen/cambium/state.json`), whole and renamed into place. canopy and `oakgreen doctor` read it.
 
 - `version` changes only on an incompatible change. Current: `1`.
 - Times are ISO 8601 UTC strings. Durations are milliseconds.
@@ -92,7 +92,7 @@ Written at the end of every tick to `paths.heartbeat` (default `~/.cambium/state
 
 ## Queue view (`queues.json`)
 
-Written every tick, after the other steps and before the heartbeat, to `paths.queues` (default `~/.cambium/queues.json`), whole and renamed into place. It is canopy's board, built from the snapshot cambium read that tick, so canopy need not query GitHub for it. Its write is the `queues` step.
+Written every tick, after the other steps and before the heartbeat, to `paths.queues` (default `~/.oakgreen/cambium/queues.json`), whole and renamed into place. It is canopy's board, built from the snapshot cambium read that tick, so canopy need not query GitHub for it. Its write is the `queues` step.
 
 | Field         | Meaning                                                                            |
 | ------------- | ---------------------------------------------------------------------------------- |
@@ -110,7 +110,7 @@ canopy treats the file as stale once `writtenAt` is more than 3 × `tickSeconds`
 
 ## Snapshots (`snapshots.json`)
 
-Written every tick, after the queue view and before the heartbeat, to `paths.snapshots` (default `~/.cambium/snapshots.json`), whole and renamed into place. It holds each repo's full snapshot, as the tick left it. `cambium run … --follow` reads it while the daemon is live. Its write is the `snapshots` step.
+Written every tick, after the queue view and before the heartbeat, to `paths.snapshots` (default `~/.oakgreen/cambium/snapshots.json`), whole and renamed into place. It holds each repo's full snapshot, as the tick left it. `cambium run … --follow` reads it while the daemon is live. Its write is the `snapshots` step.
 
 | Field         | Meaning                                                                 |
 | ------------- | ----------------------------------------------------------------------- |
