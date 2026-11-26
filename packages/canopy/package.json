@@ -1,6 +1,6 @@
 {
   "name": "@oakgreencc/canopy",
-  "version": "0.0.37",
+  "version": "0.0.38",
   "description": "A local read-only page over cambium's heartbeat and the GitHub queues: mode, ticks, workers, events, and the q:* columns with agent PRs.",
   "license": "AGPL-3.0-only",
   "type": "module",
