@@ -1,6 +1,6 @@
 ---
 title: mycelium
-description: mycelium's commands, sources, settings, issue format, fingerprints and notifier.
+description: mycelium's commands, sources, settings, issue format, fingerprints, notifier and Discord broker.
 sidebar:
   order: 5
 ---
@@ -14,8 +14,9 @@ Package: `@oakgreencc/mycelium`. Node ≥ 22. Dependencies: OpenTelemetry only. 
 | Command | Behaviour |
 | --- | --- |
 | `mycelium poll <discord\|asc\|testflight\|play\|vitals\|device-logs> [--dry-run]` | One pass over one source. Refused when the source's settings are missing. |
-| `mycelium run [--dry-run]` | Every configured source, each on its own interval, then the notifier. Sources with missing settings are skipped. |
+| `mycelium run [--dry-run]` | Every configured source, each on its own interval, then the notifier and the broker. Sources with missing settings are skipped. |
 | `mycelium notify [--dry-run]` | One notifier pass. |
+| `mycelium broker` | One broker pass: post the outbox, read thread replies into the inbox. Needs `MYCELIUM_DECISIONS_CHANNEL`. |
 | `mycelium install [--dry-run]` | Writes the launchd agent `com.oakgreencc.mycelium` (`KeepAlive`, `mycelium run`). Refused with no configured source or no `MYCELIUM_REPO`. |
 
 `--dry-run` prints one JSON line per envelope with the planned action (`create` with title, body and labels, or `comment` with the issue number). No GitHub writes, no cursor moves.
@@ -76,6 +77,9 @@ A credential or an unknown key in `forest.json` is refused. No `mycelium` sectio
 | `MYCELIUM_DISCORD_CHANNELS` | Comma list of channel ids; `forum:<id>` for a forum channel. |
 | `MYCELIUM_DISCORD_GUILD` | Guild id. Required for forum channels. |
 | `MYCELIUM_DISCORD_NOTIFY` | `true` answers Discord reporters. |
+| `MYCELIUM_DECISIONS_CHANNEL` | Text channel for the broker's threads. Refused if also in `MYCELIUM_DISCORD_CHANNELS`. Unset: no broker. |
+| `MYCELIUM_BROKER_DB` | Broker store. Default `~/.oakgreen/mycelium/broker.db`. |
+| `MYCELIUM_BROKER_INTERVAL_S` | Broker interval in `run`. Default 30. |
 | `MYCELIUM_ASC_KEY_ID`, `MYCELIUM_ASC_ISSUER_ID` † | App Store Connect API key, shared by `asc` and `testflight`. |
 | `MYCELIUM_ASC_KEY_P8` † | The `.p8` PEM, or its base64. |
 | `MYCELIUM_ASC_APP_ID` | The app's numeric App Store Connect id. |
@@ -134,6 +138,27 @@ Answers reporters where they reported, for sources with a channel turned on. Onl
 | Any other close, or an `invalid` label | **Closed without a fix.** |
 
 An intent closed before acknowledgement gets only the outcome. What was posted is recorded per issue before the cursor moves.
+
+## Broker
+
+mycelium is the stack's one Discord client. Other services queue messages and read replies through a SQLite store (WAL mode) at `$MYCELIUM_BROKER_DB`, else `~/.oakgreen/mycelium/broker.db`.
+
+```js
+import { inbox, outbox } from '@oakgreencc/mycelium'
+outbox.put({ service, topic, key, body, traceparent }) // { queued }; a repeated service + key is a no-op
+inbox.after(service, topic, cursor) // [{ cursor, service, topic, messageId, author, authorId, body, at, traceparent }]
+```
+
+| Part | Behaviour |
+| --- | --- |
+| Topic | `issue:<owner/repo>#<n>`: one public thread in the decisions channel, created on the first post. Other topics are refused. |
+| Drain | Queued messages post oldest first, at most 2000 characters, mentions never parsed. A message is posted once, across restarts. A failed post is retried next pass. |
+| Receive | A reply by a person lands in the inbox once per service that posted to the topic. Bot messages never do. |
+| Intake | The decisions channel is never read as intake. |
+| Spans | `mycelium.broker.put`, `.send`, `.receive`, all in the caller's trace (from its `traceparent`). |
+| Log | One JSON line per message: `direction` (`out`, `in`), `event`, `service`, `topic`, `key`. |
+
+The bot needs Create Public Threads and Send Messages in Threads on the decisions channel. See the [README](https://github.com/oakgreencc/monorepo/tree/main/packages/mycelium#broker) for detail.
 
 ## State
 

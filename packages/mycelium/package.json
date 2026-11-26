@@ -23,6 +23,7 @@
   ],
   "exports": {
     ".": "./src/index.mjs",
+    "./broker": "./src/broker.mjs",
     "./envfile": "./src/envfile.mjs",
     "./package.json": "./package.json",
     "./forest": "./src/forest.mjs"
