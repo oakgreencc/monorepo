@@ -9,7 +9,7 @@ By default cambium never merges a task PR. A merge queue, auto-merge or a person
 
 1. Make sure graft lets agents merge into the base. `graft doctor` prints `agents may merge into: <base>`. If the base is missing, add it to `mergeableBases` in `.graft.json` (a protected change).
 2. Make sure the base branch requires the CI check (`graft setup project --required-check <job>`).
-3. In `~/.cambium/config.json`, switch to the graph engine and turn merging on:
+3. In the `cambium` section of `~/.oakgreen/forest.json`, switch to the graph engine and turn merging on:
 
    ```json
    { "engine": "graph", "merge": "green" }

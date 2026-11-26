@@ -13,7 +13,7 @@ mycelium notify [--dry-run]                    # one notifier pass (see Notify)
 mycelium install [--dry-run]                   # write the launchd agent for `run`
 ```
 
-As a service: write the settings to `~/.mycelium/env` (see [Configuration](#configuration)), check them with `mycelium poll <source> --dry-run`, then `oakgreen start mycelium`. That writes the agent on first use (`com.oakgreencc.mycelium`, `KeepAlive`, `mycelium run`) and starts it; `oakgreen stop|restart mycelium` and `oakgreen services` manage it from there. `mycelium install` refuses when no source is configured or `MYCELIUM_REPO` is missing, since launchd would restart a process that exits at once. The plist holds only `PATH` (captured at install; `graft` must be on it), `HOME` and an explicit `MYCELIUM_ENV`, never credentials. Its log is `~/.mycelium/logs/mycelium.log`: a `mycelium up:` line at start (repository, sources, notify channels), then one timestamped tally line per pass and one JSON line per issue filed or reporter answered.
+As a service: write the settings to `~/.oakgreen/forest.json` and the credentials to `~/.oakgreen/env` (see [Configuration](#configuration)), check them with `mycelium poll <source> --dry-run`, then `oakgreen start mycelium`. That writes the agent on first use (`com.oakgreencc.mycelium`, `KeepAlive`, `mycelium run`) and starts it; `oakgreen stop|restart mycelium` and `oakgreen services` manage it from there. `mycelium install` refuses when no source is configured or `MYCELIUM_REPO` is missing, since launchd would restart a process that exits at once. The plist holds only `PATH` (captured at install; `graft` must be on it), `HOME` and an explicit `OAKGREEN_FOREST_CONFIG_PATH`, never settings or credentials. Its log is `~/.oakgreen/mycelium/logs/mycelium.log`: a `mycelium up:` line at start (repository, sources, notify channels), then one timestamped tally line per pass and one JSON line per issue filed or reporter answered.
 
 `--dry-run` prints one JSON line per envelope with the planned action (`create` with title/body/labels, or `comment` with the issue number) and writes nothing: no GitHub writes, no cursor moves. Without a repository it plans against no open intents.
 
@@ -98,11 +98,11 @@ Prod uses the read-only `log-reader` principal (SeKtor's `SEKTOR_LOG_READER_USER
 
 ## State
 
-One cursor per source in `$MYCELIUM_STATE`, else `$XDG_STATE_HOME/mycelium/state.json`, else `~/.local/state/mycelium/state.json`. The cursor moves after each envelope is filed, so a crash re-reads at most the one in flight. With no cursor, a source starts `MYCELIUM_BACKFILL_HOURS` (default 24) back.
+One cursor per source in `$MYCELIUM_STATE`, else `~/.oakgreen/mycelium/state.json`. The cursor moves after each envelope is filed, so a crash re-reads at most the one in flight. With no cursor, a source starts `MYCELIUM_BACKFILL_HOURS` (default 24) back.
 
 ## Status file
 
-`run` writes what it is doing to `$MYCELIUM_STATUS`, else `~/.mycelium/status.json`, atomically: at start, after every pass and at a clean stop. canopy's Intake tab reads it; it holds no credentials. `--dry-run`, `poll` and `notify` write none.
+`run` writes what it is doing to `$MYCELIUM_STATUS`, else `~/.oakgreen/mycelium/status.json`, atomically: at start, after every pass and at a clean stop. canopy's Intake tab reads it; it holds no credentials. `--dry-run`, `poll` and `notify` write none.
 
 ```js
 {
@@ -116,30 +116,39 @@ One cursor per source in `$MYCELIUM_STATE`, else `$XDG_STATE_HOME/mycelium/state
 
 ## Configuration
 
-From the environment, over the settings file `$MYCELIUM_ENV` (default `~/.mycelium/env`): `KEY=value` lines with the same keys, `#` comments, values bare or quoted. A variable set in the environment wins. Keep the file `0600`. A source with missing settings is skipped by `run` and refused by `poll`.
+Three places, highest first:
+
+1. The environment.
+2. `~/.oakgreen/env`: credentials, as `KEY=value` lines with the variable names below (`#` comments, values bare or quoted). Mode `0600`. Shared with the rest of the stack.
+3. The `mycelium` section of `~/.oakgreen/forest.json` (`$OAKGREEN_FOREST_CONFIG_PATH` names another file): everything that is not a credential, in camelCase without the prefix. `"repo"` is `MYCELIUM_REPO`, `"discordChannels"` is `MYCELIUM_DISCORD_CHANNELS`. Values are strings, numbers or booleans; a list joins with commas.
+
+```json
+{ "mycelium": { "repo": "owner/name", "discordChannels": ["123", "forum:456"], "discordGuild": "789" } }
+```
+
+A credential (marked † below) in `forest.json` is refused, and so is a key mycelium does not know. A source with missing settings is skipped by `run` and refused by `poll`. With no `mycelium` section while an old `~/.mycelium` (or `$XDG_STATE_HOME/mycelium`) is still there, mycelium exits 1 and names `oakgreen config migrate`.
 
 | variable                                                     | meaning                                                                                                                               |
 | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `MYCELIUM_ENV`                                               | the settings file; environment only, default `~/.mycelium/env`                                                                        |
 | `MYCELIUM_REPO`                                              | `owner/name` that receives intents (or `--repo`)                                                                                      |
-| `MYCELIUM_STATUS`                                            | status file, default `~/.mycelium/status.json` (see [Status file](#status-file))                                                      |
+| `MYCELIUM_STATUS`                                            | status file, default `~/.oakgreen/mycelium/status.json` (see [Status file](#status-file))                                             |
 | `MYCELIUM_STATE`                                             | cursor file (or `--state`)                                                                                                            |
 | `MYCELIUM_BACKFILL_HOURS`                                    | first-run window, default 24                                                                                                          |
 | `MYCELIUM_<SOURCE>_INTERVAL_S`                               | `run` interval; defaults discord 60, asc 900, testflight 900, play 1800, vitals 3600, devicelog 300 (`MYCELIUM_DEVICELOG_INTERVAL_S`) |
-| `MYCELIUM_DISCORD_TOKEN`                                     | bot token (needs View Channel + Read Message History)                                                                                 |
+| `MYCELIUM_DISCORD_TOKEN` †                                   | bot token (needs View Channel + Read Message History)                                                                                 |
 | `MYCELIUM_DISCORD_CHANNELS`                                  | comma list of channel ids; `forum:<id>` for a forum channel                                                                           |
 | `MYCELIUM_DISCORD_GUILD`                                     | guild id; required for forum channels, used for message links                                                                         |
 | `MYCELIUM_DISCORD_NOTIFY`                                    | `true` answers Discord reporters ([Notify](#notify)); the token then needs Send Messages                                              |
 | `MYCELIUM_NOTIFY_INTERVAL_S`                                 | notifier interval in `run`, default 60                                                                                                |
-| `MYCELIUM_ASC_KEY_ID`, `MYCELIUM_ASC_ISSUER_ID`              | App Store Connect API key, shared by `asc` and `testflight` (read access to reviews and beta feedback; no other credential)           |
-| `MYCELIUM_ASC_KEY_P8`                                        | the `.p8` PEM, or its base64                                                                                                          |
+| `MYCELIUM_ASC_KEY_ID`, `MYCELIUM_ASC_ISSUER_ID` †            | App Store Connect API key, shared by `asc` and `testflight` (read access to reviews and beta feedback; no other credential)           |
+| `MYCELIUM_ASC_KEY_P8` †                                      | the `.p8` PEM, or its base64                                                                                                          |
 | `MYCELIUM_ASC_APP_ID`                                        | the app's numeric App Store Connect id                                                                                                |
 | `MYCELIUM_PLAY_PACKAGE`                                      | Android package name (play and vitals)                                                                                                |
-| `MYCELIUM_PLAY_KEY_JSON` / `MYCELIUM_PLAY_KEY_PATH`          | service-account key JSON, inline or as a path (Play Console: reply to reviews / view app info; see [Vitals](#vitals))                 |
+| `MYCELIUM_PLAY_KEY_JSON` † / `MYCELIUM_PLAY_KEY_PATH`        | service-account key JSON, inline or as a path (Play Console: reply to reviews / view app info; see [Vitals](#vitals))                 |
 | `MYCELIUM_DEVICELOG_API`                                     | SeKtor API base (`VITE_API_BASE_URL`); `/v3` is added unless present                                                                  |
 | `MYCELIUM_DEVICELOG_POOL_ID`, `MYCELIUM_DEVICELOG_CLIENT_ID` | the admin Cognito user pool and its app client                                                                                        |
-| `MYCELIUM_DEVICELOG_USER`, `MYCELIUM_DEVICELOG_PASSWORD`     | the log reader's sign-in                                                                                                              |
-| `MYCELIUM_DEVICELOG_TOTP_SECRET`                             | the log reader's base32 TOTP secret                                                                                                   |
+| `MYCELIUM_DEVICELOG_USER`, `MYCELIUM_DEVICELOG_PASSWORD` †   | the log reader's sign-in                                                                                                              |
+| `MYCELIUM_DEVICELOG_TOTP_SECRET` †                           | the log reader's base32 TOTP secret                                                                                                   |
 | `MYCELIUM_DEVICELOG_STAGE`                                   | the stage in the identity, default `prod`                                                                                             |
 | `MYCELIUM_DEVICELOG_CRASHES`                                 | `true` also files `kind: crash` logs, grouped by signature                                                                            |
 

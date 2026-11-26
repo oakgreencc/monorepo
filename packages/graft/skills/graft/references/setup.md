@@ -24,7 +24,7 @@ Run it from inside the repository — the owner comes from its `origin` remote, 
 
 A `!` command has no terminal, so setup runs as if `--yes` were given: every question takes its default (e.g. the App name `<owner>-agents`; `--name` to choose another) and file writes are confirmed. A question with no default — the owner, outside a repository — makes it exit naming the flag that answers it.
 
-Opens GitHub's "create App from manifest" page with the permissions pre-filled (contents, pull requests, issues: write; actions, checks, statuses: read; no workflows, no administration). After creation it saves the key to `~/.config/graft/apps/<slug>/`, then opens the install page — install it on the repositories agents should work in.
+Opens GitHub's "create App from manifest" page with the permissions pre-filled (contents, pull requests, issues: write; actions, checks, statuses: read; no workflows, no administration). After creation it saves the key to `~/.oakgreen/graft/apps/<slug>/`, then opens the install page — install it on the repositories agents should work in.
 
 ## 3. Bootstrap the repository (once per repo)
 

@@ -1,15 +1,15 @@
 // @ts-check
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { existsSync } from 'node:fs'
+import { envFilePath, writeAtomic } from '@oakgreencc/mycelium/forest'
 import { DEFAULT_PRIORITY_LABELS, writeLabelGuide } from './label-guide.mjs'
 import {
   QUEUE_LABELS,
-  cambiumConfigPath,
   cambiumSkeleton,
   configuredRepos,
+  forestConfigPath,
   gitRoot,
   myceliumSources,
-  readCambiumConfig,
+  readForestFile,
   slugFromRemote,
 } from './stack.mjs'
 
@@ -34,8 +34,9 @@ async function originSlug(ctx) {
 }
 
 /**
- * Idempotent: creates only what is missing. Never rewrites an existing file, except to add the label-guide
- * pointer block to the repo's CLAUDE.md or AGENTS.md.
+ * Idempotent: creates only what is missing. Never rewrites an existing file, except to add the `cambium` section to
+ * forest.json (other sections kept) and the label-guide pointer block to the repo's CLAUDE.md or AGENTS.md. Creates an
+ * empty `~/.oakgreen/env` (0600) for secrets.
  *
  * @param {Context} ctx
  * @returns {Promise<{ ok: boolean, created: string[], steps: string[] }>}
@@ -46,22 +47,32 @@ export async function runSetup(ctx) {
   const steps = []
   let ok = true
 
-  const file = cambiumConfigPath(ctx)
-  const existing = readCambiumConfig(file)
+  const file = forestConfigPath(ctx)
+  const existing = readForestFile(file)
   let config = existing.config
-  if (existing.present) {
-    print(`= cambium config ${file} exists${existing.error ? ` but is not JSON (${existing.error})` : ''}; left as is`)
-    if (existing.error) ok = false
+  if (existing.error) {
+    print(`! ${file} is not a JSON object (${existing.error}); left as is`)
+    ok = false
+  } else if (existing.present) {
+    print(`= "cambium" section in ${file} exists; left as is`)
   } else {
     const slug = ctx.repo ?? ctx.env.MYCELIUM_REPO ?? (await originSlug(ctx))
     config = cambiumSkeleton(slug ?? 'OWNER/NAME', gitRoot(ctx.cwd) ?? ctx.cwd)
-    if (!slug) steps.push(`Set repos[0].slug in ${file}`)
-    if (dryRun) print(`+ would write cambium config ${file}`)
+    if (!slug) steps.push(`Set cambium.repos[0].slug in ${file}`)
+    if (dryRun) print(`+ would write the "cambium" section of ${file}`)
     else {
-      mkdirSync(dirname(file), { recursive: true })
-      writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`, { flag: 'wx' })
-      print(`+ wrote cambium config ${file}`)
+      writeAtomic(file, `${JSON.stringify({ ...(existing.forest ?? {}), cambium: config }, null, 2)}\n`)
+      print(`+ wrote the "cambium" section of ${file}`)
       created.push(file)
+    }
+  }
+  const envFile = envFilePath({ home: ctx.home, env: ctx.env })
+  if (!existsSync(envFile)) {
+    if (dryRun) print(`+ would create ${envFile} (0600, for secrets)`)
+    else {
+      writeAtomic(envFile, '# Secrets for the oakgreen stack: KEY=value, one per line. Never in forest.json.\n', 0o600)
+      print(`+ created ${envFile} (0600, for secrets)`)
+      created.push(envFile)
     }
   }
 
@@ -99,12 +110,12 @@ export async function runSetup(ctx) {
 
   steps.push(
     'Create the GitHub Apps (cambium and workers) and install them on the repo: graft setup app',
-    `Set graft.app, graft.botLogin and worker.graftApp in ${file}`,
+    `Set cambium.graft.app, cambium.graft.botLogin and cambium.worker.graftApp in ${file}`,
     'Start the services: oakgreen start (installs the launchd agents on first run)',
   )
   if (!myceliumSources(ctx.env).length)
     steps.push(
-      'Optional: write MYCELIUM_* settings to ~/.mycelium/env (see the mycelium README), then: oakgreen start mycelium',
+      `Optional: mycelium settings in the "mycelium" section of ${file}, credentials in ${envFile} (see the mycelium README), then: oakgreen start mycelium`,
     )
   print('\nRemaining human steps:')
   for (const [i, s] of steps.entries()) print(`  ${i + 1}. ${s}`)

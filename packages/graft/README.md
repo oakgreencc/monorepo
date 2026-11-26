@@ -1,6 +1,6 @@
 # graft
 
-Formerly **agit**. A machine or repo set up under that name keeps working: `.agit.json`, the `"agit"` key in `package.json`, `AGIT_*` variables, `~/.config/agit`, and the `agit` command are all still read.
+Formerly **agit**. A machine or repo set up under that name keeps working: `.agit.json`, the `"agit"` key in `package.json`, `AGIT_*` variables, and the `agit` command are all still read. (Its old machine directory, `~/.config/agit`, moves with `oakgreen config migrate`.)
 
 Let a coding agent work a GitHub project **as a GitHub App**, with the local `git` binary kept read-only toward GitHub.
 
@@ -87,9 +87,9 @@ Or put the same object under an `"graft"` key in the root `package.json`; `graft
 
 graft protects that key, not the whole file: an edit, publish or merge that changes `"graft"` needs a grant, while a dependency bump stays ordinary. GitHub cannot enforce a key, so `graft doctor` warns unless CODEOWNERS also owns `/package.json`; own it, or use `.graft.json`, when you want GitHub's review as the hard boundary.
 
-Defaults and the reasoning behind each: [src/config.mjs](src/config.mjs). Machine identity (which App acts for which owner) lives in `~/.config/graft/`, never in the repo.
+Defaults and the reasoning behind each: [src/config.mjs](src/config.mjs). Machine identity (which App acts for which owner) is the `graft` section of `~/.oakgreen/forest.json` (`$OAKGREEN_FOREST_CONFIG_PATH` names another file), never the repo; App keys live in `$GRAFT_HOME/apps/<slug>/` (default `~/.oakgreen/graft`), mode 0600. A machine still holding `~/.config/graft` with no `graft` section is refused, naming `oakgreen config migrate`.
 
-REST reads go through an ETag cache in `~/.config/graft/cache/http/` ([src/github/http-cache.mjs](src/github/http-cache.mjs)): a repeated GET sends `If-None-Match`, and a 304 is served from the cache without spending rate limit. `GRAFT_HTTP_CACHE=0` turns it off. A GraphQL answer that is a `RATE_LIMIT` error is thrown as `graphql: rate limited until <reset>: …`, so a poller can wait out the reset.
+REST reads go through an ETag cache in `~/.oakgreen/graft/cache/http/` ([src/github/http-cache.mjs](src/github/http-cache.mjs)): a repeated GET sends `If-None-Match`, and a 304 is served from the cache without spending rate limit. `GRAFT_HTTP_CACHE=0` turns it off. A GraphQL answer that is a `RATE_LIMIT` error is thrown as `graphql: rate limited until <reset>: …`, so a poller can wait out the reset.
 
 ## Tests
 

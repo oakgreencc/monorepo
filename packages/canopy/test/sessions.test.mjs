@@ -278,8 +278,8 @@ test('/api/traces/<id>/sessions/<session>: only a session that trace names', asy
 
 test('resolveSettings: --logs, else paths.logs, else <paths.home>/logs', () => {
   const home = '/h'
-  const read = (/** @type {any} */ cfg) => () => JSON.stringify(cfg)
-  assert.equal(resolveSettings({}, { env: {}, home, read: read({}) }).logsPath, '/h/.cambium/logs')
+  const read = (/** @type {any} */ cambium) => () => JSON.stringify({ cambium })
+  assert.equal(resolveSettings({}, { env: {}, home, read: read({}) }).logsPath, '/h/.oakgreen/cambium/logs')
   assert.equal(resolveSettings({}, { env: {}, home, read: read({ paths: { home: '/c' } }) }).logsPath, '/c/logs')
   assert.equal(resolveSettings({}, { env: {}, home, read: read({ paths: { logs: '~/l' } }) }).logsPath, '/h/l')
   assert.equal(

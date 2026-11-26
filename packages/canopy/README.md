@@ -27,7 +27,7 @@ The **Graphs** tab draws cambium's graphs as the heartbeat describes them (cambi
 
 ## Intake
 
-The **Intake** tab shows mycelium's sources, read from the status file `mycelium run` writes (mycelium's README, [Status file](../mycelium/README.md#status-file); `--intake`, default `$MYCELIUM_STATUS`, else `~/.mycelium/status.json`). canopy never opens mycelium's settings file: the status file names what each source reads, never its credentials.
+The **Intake** tab shows mycelium's sources, read from the status file `mycelium run` writes (mycelium's README, [Status file](../mycelium/README.md#status-file); `--intake`, default `$MYCELIUM_STATUS`, else `~/.oakgreen/mycelium/status.json`). canopy never opens mycelium's settings file: the status file names what each source reads, never its credentials.
 
 - **At a glance.** How many sources are configured and how many need a look; mycelium's uptime and pid; what each source filed in the last 24 hours (issues opened and comments, from the `mycelium.intake` spans); the repository it files into, with the `q:intake` count awaiting triage; and whether it answers reporters.
 - **Configured.** One row per source: what it reads (channel count, app id, package, stage), its state, interval, last pass (when, what it filed, how long it took), when the next is due, and its filings over 24 hours and 7 days. A failed pass's error is shown under the row. States: **polling**, **first pass due**, **failing** (last pass failed), **overdue** (next pass more than 2 minutes, or one interval, late), **stopped**. When every source is overdue, mycelium is reported as possibly stopped.
@@ -38,7 +38,7 @@ No status file (mycelium not running, or older than the status file) gets a note
 
 ## Traces
 
-The **Traces** tab shows cambium's OpenTelemetry spans (see cambium's README, [Tracing](../cambium/README.md#tracing)) without Jaeger: canopy reads the JSON-lines file that cambium's local collector (`packages/cambium/otel/otelcol.yaml`) writes, `~/.cambium/otel/traces.jsonl` by default, plus its rotated backups (`traces-<time>.jsonl`, newest first, up to 64 MB in all).
+The **Traces** tab shows cambium's OpenTelemetry spans (see cambium's README, [Tracing](../cambium/README.md#tracing)) without Jaeger: canopy reads the JSON-lines file that cambium's local collector (`packages/cambium/otel/otelcol.yaml`) writes, `~/.oakgreen/cambium/otel/traces.jsonl` by default, plus its rotated backups (`traces-<time>.jsonl`, newest first, up to 64 MB in all).
 
 - **Runs.** One row per trace, newest first: one workflow run of an issue through cambium's graphs (the `cambium.issue` root and every `cambium.node` / `cambium.wait` / `claude.*` span under it, across ticks), or a mycelium intake. Each row shows the issue, graph, the last node to finish and its `cambium.outcome`, start, duration, span and failed-span counts and the summed `claude.cost_usd`.
 - **One run** (`#traces/<id>`): a waterfall of its spans, parents above children; waits are grey, failed spans red. Click a span for its attributes, status and events.
@@ -70,23 +70,25 @@ oakgreen restart canopy      # new process on new code, e.g. after npm i -g
 
 With the `proxy` service running too (`oakgreen start` starts it), canopy is also at `http://canopy.localhost/`; see oakgreen's [Proxy](../oakgreen/README.md#proxy).
 
-`canopy install [flags]` writes `~/Library/LaunchAgents/com.oakgreencc.canopy.plist`, serving with the flags given (`--dry-run` prints it instead). KeepAlive restarts it whenever it exits; output goes to `~/.canopy/logs/canopy.log`. After changing the flags, run `canopy install …` again, then `oakgreen reload canopy`.
+`canopy install` writes `~/Library/LaunchAgents/com.oakgreencc.canopy.plist` (`--dry-run` prints it instead). It takes no serve flags and refuses any: the agent reads its settings from `forest.json` at start. KeepAlive restarts it whenever it exits; output goes to `~/.oakgreen/canopy/logs/canopy.log`. After changing the `canopy` section, `oakgreen restart canopy`.
 
 ## Flags
 
-| Flag                  | Default                                                                                         |
-| --------------------- | ----------------------------------------------------------------------------------------------- |
-| `--port <n>`          | `4317`                                                                                          |
-| `--host <addr>`       | `127.0.0.1`. canopy never binds a public address unless told to.                                |
-| `--state <file>`      | cambium config's `paths.heartbeat` (or `paths.home`/`state.json`), else `~/.cambium/state.json` |
-| `--queues <file>`     | cambium config's `paths.queues` (or `paths.home`/`queues.json`), else `~/.cambium/queues.json`  |
-| `--traces <file>`     | `<paths.home>/otel/traces.jsonl` from the cambium config, else `~/.cambium/otel/traces.jsonl`   |
-| `--logs <dir>`        | cambium config's `paths.logs` (or `paths.home`/`logs`), else `~/.cambium/logs`                  |
-| `--intake <file>`     | `$MYCELIUM_STATUS`, else `~/.mycelium/status.json`                                              |
-| `--config <file>`     | `$CAMBIUM_CONFIG`, else `~/.cambium/config.json`                                                |
-| `--repo <owner/name>` | repeatable; else the config's `repos[].slug`, else the heartbeat's repos                        |
-| `--cache <seconds>`   | `60`; minimum `15`; for GitHub reads only                                                       |
-| `--graft <cmd>`       | `graft`                                                                                         |
+Each flag may instead be set in the `canopy` section of `~/.oakgreen/forest.json` (`port`, `host`, `state`, `queues`, `traces`, `logs`, `intake`, `repos`, `cache`, `graft`); a flag wins, then the environment, then `forest.json`, then the defaults below. "cambium's" means forest.json's `cambium` section. With no `cambium` section while `~/.cambium` or `~/.canopy` is still there, canopy exits 2 naming `oakgreen config migrate`.
+
+| Flag                  | Default                                                                                               |
+| --------------------- | ----------------------------------------------------------------------------------------------------- |
+| `--port <n>`          | `4317`                                                                                                |
+| `--host <addr>`       | `127.0.0.1`. canopy never binds a public address unless told to.                                      |
+| `--state <file>`      | cambium's `paths.heartbeat` (or `paths.home`/`state.json`), else `~/.oakgreen/cambium/state.json`     |
+| `--queues <file>`     | cambium's `paths.queues` (or `paths.home`/`queues.json`), else `~/.oakgreen/cambium/queues.json`      |
+| `--traces <file>`     | `<paths.home>/otel/traces.jsonl` from cambium's section, else `~/.oakgreen/cambium/otel/traces.jsonl` |
+| `--logs <dir>`        | cambium's `paths.logs` (or `paths.home`/`logs`), else `~/.oakgreen/cambium/logs`                      |
+| `--intake <file>`     | `$MYCELIUM_STATUS`, else mycelium's `status`, else `~/.oakgreen/mycelium/status.json`                 |
+| `--config <file>`     | `forest.json`: `$OAKGREEN_FOREST_CONFIG_PATH`, else `~/.oakgreen/forest.json`                         |
+| `--repo <owner/name>` | repeatable; else cambium's `repos[].slug`, else the heartbeat's repos                                 |
+| `--cache <seconds>`   | `60`; minimum `15`; for GitHub reads only                                                             |
+| `--graft <cmd>`       | `graft`                                                                                               |
 
 ## What it serves
 
@@ -112,7 +114,7 @@ Queues come from labels, as cambium writes them: an open issue with `running` is
 
 ## Queue view
 
-While cambium runs, the queues come from the queue view it writes every tick (`paths.queues`, default `~/.cambium/queues.json`; shape in cambium's README, [Queue view](../cambium/README.md#queue-view-queuesjson)), re-read on each `/api/state`, and canopy makes no GraphQL call for them. It queries GitHub itself for a repo when the file is missing, unreadable, of another `version`, older than 3 × its `tickSeconds` (cambium is down), or does not list the repo; the page shows a **Queues read from GitHub** banner saying why. The issue pane always reads GitHub, through the cache below.
+While cambium runs, the queues come from the queue view it writes every tick (`paths.queues`, default `~/.oakgreen/cambium/queues.json`; shape in cambium's README, [Queue view](../cambium/README.md#queue-view-queuesjson)), re-read on each `/api/state`, and canopy makes no GraphQL call for them. It queries GitHub itself for a repo when the file is missing, unreadable, of another `version`, older than 3 × its `tickSeconds` (cambium is down), or does not list the repo; the page shows a **Queues read from GitHub** banner saying why. The issue pane always reads GitHub, through the cache below.
 
 ## Cache
 

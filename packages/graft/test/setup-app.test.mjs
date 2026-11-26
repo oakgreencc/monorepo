@@ -42,7 +42,7 @@ test('awaitManifestCode: serves the manifest, refuses a foreign state, returns t
 test('saveApp: key 0600, dirs 0700, no client/webhook secrets, owner mapped and default set', () => {
   const home = mkdtempSync(join(tmpdir(), 'graft-home-'))
   try {
-    const env = { GRAFT_HOME: home }
+    const env = { GRAFT_HOME: home, OAKGREEN_FOREST_CONFIG_PATH: join(home, 'forest.json') }
     const out = saveApp({
       app: {
         id: 42,
@@ -63,12 +63,17 @@ test('saveApp: key 0600, dirs 0700, no client/webhook secrets, owner mapped and 
     const meta = readFileSync(join(dir, 'app.json'), 'utf8')
     assert.doesNotMatch(meta, /SECRET/)
     assert.equal(JSON.parse(meta).id, 42)
-    const cfg = JSON.parse(readFileSync(join(home, 'config.json'), 'utf8'))
+    const cfg = JSON.parse(readFileSync(join(home, 'forest.json'), 'utf8')).graft
     assert.deepEqual(cfg, { owners: { acme: 'acme-agents' }, defaultApp: 'acme-agents' })
+    assert.doesNotMatch(
+      readFileSync(join(home, 'forest.json'), 'utf8'),
+      /PRIVATE KEY|SECRET/,
+      'no secret in forest.json',
+    )
 
     // A second App for another owner is mapped but does not steal the default.
     saveApp({ app: { id: 7, slug: 'other', pem, owner: { login: 'Other' } }, env })
-    const cfg2 = JSON.parse(readFileSync(join(home, 'config.json'), 'utf8'))
+    const cfg2 = JSON.parse(readFileSync(join(home, 'forest.json'), 'utf8')).graft
     assert.equal(cfg2.defaultApp, 'acme-agents')
     assert.equal(cfg2.owners.other, 'other')
   } finally {
@@ -109,7 +114,7 @@ test('setupApp: the whole manifest flow against a fake GitHub', async () => {
   try {
     const out = await setupApp(['--owner', 'acme', '--name', 'acme-bots', '--no-wait'], {
       fetch: fakeFetch,
-      env: { ...process.env, GRAFT_HOME: home },
+      env: { ...process.env, GRAFT_HOME: home, OAKGREEN_FOREST_CONFIG_PATH: join(home, 'forest.json') },
       prompt: scriptedPrompter(),
       open: (url) => {
         opened.push(url)
@@ -148,11 +153,11 @@ test('setupApp --manual: validates the pair with GET /app before storing it', as
   try {
     const out = await setupApp(['--manual', '--app-id', '5', '--key', keyFile, '--no-wait'], {
       fetch: fakeFetch,
-      env: { ...process.env, GRAFT_HOME: home },
+      env: { ...process.env, GRAFT_HOME: home, OAKGREEN_FOREST_CONFIG_PATH: join(home, 'forest.json') },
       prompt: scriptedPrompter(),
     })
     assert.equal(out.slug, 'mine')
-    assert.equal(JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')).owners.me, 'mine')
+    assert.equal(JSON.parse(readFileSync(join(home, 'forest.json'), 'utf8')).graft.owners.me, 'mine')
   } finally {
     console.log = origLog
     rmSync(home, { recursive: true, force: true })
@@ -181,7 +186,7 @@ async function flowFromOrigin({ login, type, form }) {
     // No --yes: without a terminal the App name takes its default anyway.
     const out = await setupApp(['--no-wait'], {
       fetch: fakeFetch,
-      env: { ...process.env, GRAFT_HOME: home },
+      env: { ...process.env, GRAFT_HOME: home, OAKGREEN_FOREST_CONFIG_PATH: join(home, 'forest.json') },
       prompt: createPrompter({ interactive: false }),
       repoOwner: () => login,
       open: (url) => {
@@ -195,7 +200,7 @@ async function flowFromOrigin({ login, type, form }) {
       },
     })
     assert.equal(out.owner, login)
-    assert.equal(JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')).owners[login], `${login}-agents`)
+    assert.equal(JSON.parse(readFileSync(join(home, 'forest.json'), 'utf8')).graft.owners[login], `${login}-agents`)
   } finally {
     console.log = origLog
     rmSync(home, { recursive: true, force: true })

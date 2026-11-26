@@ -10,14 +10,14 @@ That is why CODEOWNERS is the manifest: the tripwire and the boundary read the s
 
 ## Where things live
 
-| State                                                 | Location                              | Why                                       |
-| ----------------------------------------------------- | ------------------------------------- | ----------------------------------------- |
-| Project policy                                        | `.graft.json` (tracked, protected)    | reviewed like code                        |
-| Protected paths                                       | CODEOWNERS (tracked, protected)       | GitHub enforces it too                    |
-| App identity + key                                    | `~/.config/graft/apps/<slug>/` (0600) | machine, never repo                       |
-| Token cache                                           | `~/.config/graft/cache/` (0600)       | the credential helper runs on every fetch |
-| Maintainer grants (`maintainer/<session>.json`) + log | `<git-common-dir>/graft/`             | untracked, shared by worktrees of a clone |
-| Validation receipt                                    | `<git-dir>/graft/validated-base.json` | per worktree, untracked                   |
+| State                                                 | Location                                | Why                                       |
+| ----------------------------------------------------- | --------------------------------------- | ----------------------------------------- |
+| Project policy                                        | `.graft.json` (tracked, protected)      | reviewed like code                        |
+| Protected paths                                       | CODEOWNERS (tracked, protected)         | GitHub enforces it too                    |
+| App identity + key                                    | `~/.oakgreen/graft/apps/<slug>/` (0600) | machine, never repo                       |
+| Token cache                                           | `~/.oakgreen/graft/cache/` (0600)       | the credential helper runs on every fetch |
+| Maintainer grants (`maintainer/<session>.json`) + log | `<git-common-dir>/graft/`               | untracked, shared by worktrees of a clone |
+| Validation receipt                                    | `<git-dir>/graft/validated-base.json`   | per worktree, untracked                   |
 
 ## Port map from SeKtor
 

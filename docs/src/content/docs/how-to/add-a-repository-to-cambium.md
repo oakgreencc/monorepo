@@ -15,7 +15,7 @@ The repository needs graft set up and the App installed on it: see [Set up graft
 
    Run it from a clone of that repository to also get the label guide `docs/agents/triage-labels.md`. Commit it.
 
-2. Add an entry to `repos` in `~/.cambium/config.json`:
+2. Add an entry to `repos` in the `cambium` section of `~/.oakgreen/forest.json`:
 
    ```json
    { "slug": "owner/name", "path": "~/src/name", "baseBranch": "main" }

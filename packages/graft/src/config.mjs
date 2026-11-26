@@ -10,9 +10,10 @@
  *                                   an agent cannot loosen the policy it runs under
  *                                   without a human's grant and a code-owner review.
  *
- *   `$GRAFT_HOME/config.json`        the MACHINE's identity: which GitHub App acts
- *   (`~/.config/graft` by default)   for which owner. App keys live beside it in
- *                                   `apps/<slug>/`. Never tracked. The only key
+ *   forest.json → `graft`           the MACHINE's identity: which GitHub App acts
+ *   (`~/.oakgreen/forest.json`)      for which owner (forest.mjs). App keys live in
+ *                                   `$GRAFT_HOME/apps/<slug>/` (`~/.oakgreen/graft`
+ *                                   by default), 0600. Never tracked. The only key
  *                                   material an agent session ever holds is the
  *                                   App's, never a human's.
  *
@@ -21,8 +22,8 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { assertMigrated, forestPath, oakgreenDir, readForest, sectionOf } from './forest.mjs'
 
 /** The project file, at the repository root. */
 export const PROJECT_FILE = '.graft.json'
@@ -221,14 +222,9 @@ export function mergeableBases(config, baseBranch) {
 // Machine config
 // ---------------------------------------------------------------------------
 
-/** Where machine config and App credentials live. */
+/** Where App credentials and graft's caches live: `$GRAFT_HOME`, else `~/.oakgreen/graft`. */
 export function graftHome(env = process.env) {
-  if (env.GRAFT_HOME) return env.GRAFT_HOME
-  if (env.AGIT_HOME) return env.AGIT_HOME
-  const xdg = env.XDG_CONFIG_HOME || join(env.HOME || homedir(), '.config')
-  // A machine set up while graft was agit keeps its Apps where they are.
-  if (!existsSync(join(xdg, 'graft')) && existsSync(join(xdg, 'agit'))) return join(xdg, 'agit')
-  return join(xdg, 'graft')
+  return env.GRAFT_HOME || join(oakgreenDir({ env }), 'graft')
 }
 
 /**
@@ -237,15 +233,15 @@ export function graftHome(env = process.env) {
  * @typedef {{ defaultApp?: string | null, owners?: Record<string, string> }} UserConfig
  */
 
-/** @returns {UserConfig} */
+/**
+ * The machine settings: forest.json's `graft` section (`$OAKGREEN_FOREST_CONFIG_PATH` names another file). Without
+ * `$GRAFT_HOME`, a machine still holding `~/.config/graft` and no section is refused (run `oakgreen config migrate`).
+ * @returns {UserConfig}
+ */
 export function loadUserConfig(env = process.env) {
-  const path = join(graftHome(env), 'config.json')
-  if (!existsSync(path)) return {}
-  try {
-    return JSON.parse(readFileSync(path, 'utf8'))
-  } catch (err) {
-    throw new Error(`${path}: ${/** @type {Error} */ (err).message}`)
-  }
+  const { forest } = readForest(forestPath(undefined, { env }))
+  if (!env.GRAFT_HOME) assertMigrated('graft', forest, { env })
+  return /** @type {UserConfig} */ (sectionOf(forest, 'graft'))
 }
 
 /**

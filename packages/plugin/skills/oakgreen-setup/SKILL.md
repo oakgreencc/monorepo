@@ -52,15 +52,15 @@ graft is required for everything except canker and deadwood; pick it automatical
 
 ## 3. Ask how to configure each
 
-Ask only what the chosen components need; take defaults from what step 1 found (the `origin` remote, an existing cambium config).
+Ask only what the chosen components need; take defaults from what step 1 found (the `origin` remote, an existing `forest.json`).
 
 - **Repository** (graft, cambium, mycelium, canker, deadwood): `owner/name`, and the local clone path. cambium makes worktrees from that clone.
-- **cambium config path**: default `~/.cambium/config.json` (or `$CAMBIUM_CONFIG`). An existing file is never rewritten by `oakgreen setup`; edits to it are yours, with a yes.
+- **Where config and secrets go**: every component's config is one section of `~/.oakgreen/forest.json` (or `$OAKGREEN_FOREST_CONFIG_PATH`): `cambium`, `mycelium`, `canopy`, `graft`, `proxy`. Secrets (tokens, keys, passwords) go only in `~/.oakgreen/env`, mode 600, written by the human. Never write a per-service file (`~/.cambium/config.json`, `~/.mycelium/env`): nothing reads them. `oakgreen setup` adds only a missing `cambium` section; edits to an existing section are yours, with a yes. A machine that still has those old files needs `oakgreen config migrate` first (`--dry-run`, then for real, with the services stopped).
 - **GitHub Apps** (graft, cambium): reuse an App this machine already has (`graft doctor` names it) or create one. cambium can act as one App and its workers as another (`graft.app`, `worker.graftApp`); one App for both is fine to start.
 - **cambium options**: task cap (default 2), `engine` (`legacy` default; `graph` for triage and tracing of graph runs), who merges (`merge`: `none` default).
 - **tracing**: local files only (default), plus Jaeger (needs Docker), or AWS X-Ray (`otelcol-aws.yaml`).
-- **mycelium**: which sources (discord, asc, play) and the repo issues go to (`MYCELIUM_REPO`).
-- **canopy**: port (default 4317).
+- **mycelium**: which sources (discord, asc, play) and the repo issues go to (`repo` in its `forest.json` section).
+- **canopy**: port (default 4317), set in its `forest.json` section.
 - **canker / deadwood**: install as devDependencies in the repo, and config as a file (`canker.json`, `deadwood.json`) or a `package.json` key.
 
 Then **show the plan**: an ordered list of every step, marked _you_ (agent, with a yes) or _human_, with the files and services each touches. Ask for a go on the plan before step 4. The go does not replace the per-step yes.
@@ -71,11 +71,11 @@ The order follows the dependencies: credentials before anything calls GitHub, th
 
 1. **Install the CLI** if missing: `npm install -g oakgreen`.
 2. **graft** _(human)_: create and install the GitHub App, bootstrap the repo: `! graft setup` from the repo. Check: `graft doctor` passes.
-3. **cambium config and labels**: `oakgreen setup --dry-run --repo <o/n> --config <file>`, show it, then run it without `--dry-run`. It writes the config skeleton (only if absent), creates the queue labels, and, run from the clone, writes the label guide `docs/agents/triage-labels.md` plus a pointer in `CLAUDE.md`/`AGENTS.md`. Agents read the guide to file issues with `q:intake` and leave the queue labels to cambium. Without it they fall back to labels nothing reads (`ready-for-agent`, `hitl:*`). The guide and pointer are repo changes: include them in the step 8 commit. An existing config is left as is, so a new repo on a machine that already runs cambium needs its own `repos[]` entry, added by you (show the diff, ask). Then set the App: `graft.app`, `graft.botLogin` (`<app-slug>[bot]`) and `worker.graftApp` apply to **every** repo in the config, so set them for a config that serves only this owner; when it already serves other owners, leave them and let graft's per-owner App mapping (written by `graft setup app`) pick the App. Add the options from step 3 the same way.
+3. **cambium config and labels**: `oakgreen setup --dry-run --repo <o/n>`, show it, then run it without `--dry-run`. It writes the `cambium` section of `forest.json` (only if absent) and an empty `~/.oakgreen/env` (600), creates the queue labels, and, run from the clone, writes the label guide `docs/agents/triage-labels.md` plus a pointer in `CLAUDE.md`/`AGENTS.md`. Agents read the guide to file issues with `q:intake` and leave the queue labels to cambium. Without it they fall back to labels nothing reads (`ready-for-agent`, `hitl:*`). The guide and pointer are repo changes: include them in the step 8 commit. An existing `cambium` section is left as is, so a new repo on a machine that already runs cambium needs its own `repos[]` entry, added by you (show the diff, ask). Then set the App in the `cambium` section: `graft.app`, `graft.botLogin` (`<app-slug>[bot]`) and `worker.graftApp` apply to **every** repo in it, so set them for a config that serves only this owner; when it already serves other owners, leave them and let graft's per-owner App mapping (the `graft` section, written by `graft setup app`) pick the App. Add the options from step 3 the same way.
 4. **tracing**: collector config and agent, then `oakgreen start otelcol`; then the `OTEL_*` env in cambium's agent.
 5. **cambium**: `oakgreen start cambium` (writes the agent on first run, then loads it).
-6. **mycelium** _(human writes the secrets)_: `~/.mycelium/env`, then `mycelium poll <source> --dry-run`, then `oakgreen start mycelium`.
-7. **canopy**: `oakgreen start canopy` (or `canopy install --port <n>` first for a non-default port, then `oakgreen reload canopy`), then `oakgreen start proxy` so it answers at `http://canopy.localhost/` (port 80 taken: `oakgreen proxy install --port <n>` first).
+6. **mycelium** _(human writes the secrets)_: you write the non-secret settings into its `forest.json` section (with a yes); the human writes the credentials into `~/.oakgreen/env`. Then `mycelium poll <source> --dry-run`, then `oakgreen start mycelium`.
+7. **canopy**: a non-default port goes in its `forest.json` section (`canopy install` takes no flags); `oakgreen start canopy`, then `oakgreen start proxy` so it answers at `http://canopy.localhost/` (port 80 taken: `oakgreen proxy install --port <n>` first).
 8. **canker / deadwood**: devDependency and config file in the repo. These, and the label guide from step 3, are repo changes: the user commits them their usual way (in a graft repo, through `graft publish`).
 
 After each step run its check from [references/components.md](references/components.md) and say in one line whether it passed.

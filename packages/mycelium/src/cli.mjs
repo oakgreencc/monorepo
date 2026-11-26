@@ -4,7 +4,7 @@ import { homedir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { envFilePath, withEnvFile } from './envfile.mjs'
+import { settingsHint, withEnvFile } from './envfile.mjs'
 import { graftClient } from './github.mjs'
 import { createIntake } from './intake.mjs'
 import { logPath, plist, plistPath } from './launchd.mjs'
@@ -24,10 +24,10 @@ export const HELP = `mycelium — intake connectors: external events become q:in
 Flags:
   --dry-run          print envelopes and the issue actions; no writes, no cursor moves
   --repo <o/r>       target repository (else $MYCELIUM_REPO)
-  --state <file>     cursor file (else $MYCELIUM_STATE, else $XDG_STATE_HOME/mycelium/state.json)
+  --state <file>     cursor file (else $MYCELIUM_STATE, else ~/.oakgreen/mycelium/state.json)
 
-Credentials and settings come from the environment over $MYCELIUM_ENV (default ~/.mycelium/env),
-a KEY=value file with the same keys; see the README. Spans export over
+Settings come from the environment, over ~/.oakgreen/env (credentials, KEY=value), over the "mycelium"
+section of ~/.oakgreen/forest.json ($OAKGREEN_FOREST_CONFIG_PATH); see the README. Spans export over
 OTLP/HTTP when OTEL_EXPORTER_OTLP_ENDPOINT is set; --dry-run never exports.`
 
 /** @type {import('./intake.mjs').GithubClient} */
@@ -99,7 +99,7 @@ export async function main(argv, deps = {}) {
   const repo = values.repo ?? env.MYCELIUM_REPO
   if (!repo && !deps.github && !dryRun) throw new Error('no repository: pass --repo <owner/name> or set MYCELIUM_REPO')
   const github = deps.github ?? (repo ? graftClient({ repo }) : offline)
-  const state = dryRun ? memoryState() : fileState(values.state ?? defaultStatePath(env))
+  const state = dryRun ? memoryState() : fileState(values.state ?? defaultStatePath(env, deps.home))
   const hours = Number(env.MYCELIUM_BACKFILL_HOURS ?? BACKFILL_HOURS)
   // A dry run files nothing, so it records and exports nothing.
   const tracing = dryRun ? NO_TRACING : (deps.tracing ?? (await createTracing({ env })))
@@ -214,7 +214,7 @@ function install(env, dryRun, deps, out) {
     home,
     path: env.PATH ?? '/usr/bin:/bin',
     logFile: logPath(home),
-    envFile: env.MYCELIUM_ENV,
+    forest: env.OAKGREEN_FOREST_CONFIG_PATH,
   })
   const target = plistPath(home)
   if (dryRun) {
@@ -228,8 +228,8 @@ function install(env, dryRun, deps, out) {
       return false
     }
   })
-  if (!configured.length) throw new Error(`no source is configured; write settings to ${envFilePath(env, home)} first`)
-  if (!env.MYCELIUM_REPO) throw new Error(`no repository: set MYCELIUM_REPO in ${envFilePath(env, home)}`)
+  if (!configured.length) throw new Error(`no source is configured; write settings to ${settingsHint(env, home)} first`)
+  if (!env.MYCELIUM_REPO) throw new Error(`no repository: set "repo" (MYCELIUM_REPO) in ${settingsHint(env, home)}`)
   const write =
     deps.write ??
     ((/** @type {string} */ p, /** @type {string} */ t) => {

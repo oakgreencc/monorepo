@@ -48,23 +48,23 @@ Do: create the credentials for each chosen source (see the mycelium README "Conf
 - asc: an App Store Connect API key (key id, issuer id, the `.p8`), and the app's numeric id.
 - play: a Google Cloud service account with access in Play Console, its key JSON (a path is fine), and the package name. Vitals also needs the Play Developer Reporting API enabled and View app information.
 
-Then they write `~/.mycelium/env`, one `KEY=value` per line, and make it private. Give them the key names, not values, e.g.:
+Then they write the credentials into `~/.oakgreen/env`, one `KEY=value` per line, and make it private. Give them the key names, not values, e.g.:
 
 ```
-MYCELIUM_REPO=owner/name
 MYCELIUM_DISCORD_TOKEN=...
-MYCELIUM_DISCORD_CHANNELS=123,forum:456
 ```
 
 ```
-! chmod 600 ~/.mycelium/env
+! chmod 600 ~/.oakgreen/env
 ```
+
+The settings that are not credentials go in the `mycelium` section of `~/.oakgreen/forest.json`, which you may write (show the diff, ask): `{ "repo": "owner/name", "discordChannels": ["123", "forum:456"], "discordGuild": "789" }`. The credentials (`MYCELIUM_DISCORD_TOKEN`, `MYCELIUM_ASC_KEY_ID`, `MYCELIUM_ASC_ISSUER_ID`, `MYCELIUM_ASC_KEY_P8`, `MYCELIUM_PLAY_KEY_JSON`, `MYCELIUM_DEVICELOG_USER`, `_PASSWORD`, `_TOTP_SECRET`) never go there; mycelium refuses them in `forest.json`.
 
 Check, without printing values:
 
 ```sh
-stat -f '%Lp' ~/.mycelium/env                 # 600
-cut -d= -f1 ~/.mycelium/env | grep -v '^#'    # the key names
+stat -f '%Lp' ~/.oakgreen/env                 # 600
+cut -d= -f1 ~/.oakgreen/env | grep -v '^#'    # the key names
 oakgreen doctor --json                        # every "mycelium <source>" check ok
 mycelium poll <source> --dry-run              # plans issues, writes nothing
 ```
@@ -73,6 +73,6 @@ mycelium poll <source> --dry-run              # plans issues, writes nothing
 
 Why theirs: AWS credentials and account settings.
 
-Do: enable X-Ray Transaction Search in the region, give the collector's process AWS credentials through the default chain (e.g. a profile in `~/.aws`), and set the region and workspace in `~/.cambium/otel/otelcol.yaml` copied from `otelcol-aws.yaml`.
+Do: enable X-Ray Transaction Search in the region, give the collector's process AWS credentials through the default chain (e.g. a profile in `~/.aws`), and set the region and workspace in `~/.oakgreen/cambium/otel/otelcol.yaml` copied from `otelcol-aws.yaml`.
 
-Check: `otelcol-contrib validate --config ~/.cambium/otel/otelcol.yaml` exits 0, and `~/.cambium/otel/otelcol.log` shows no export errors a minute after `oakgreen restart otelcol`.
+Check: `otelcol-contrib validate --config ~/.oakgreen/cambium/otel/otelcol.yaml` exits 0, and `~/.oakgreen/cambium/logs/otelcol.log` shows no export errors a minute after `oakgreen restart otelcol`.

@@ -6,14 +6,15 @@
  * next is due. Rewritten atomically at start, after every pass and at a clean stop.
  */
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
-import { homedir, hostname } from 'node:os'
+import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
+import { serviceDir } from './forest.mjs'
 
 export const STATUS_VERSION = 1
 
-/** `$MYCELIUM_STATUS`, else `~/.mycelium/status.json`. @param {Record<string, string | undefined>} env @param {string} [home] */
-export const defaultStatusPath = (env, home = env.HOME || homedir()) =>
-  env.MYCELIUM_STATUS || join(home, '.mycelium', 'status.json')
+/** `$MYCELIUM_STATUS`, else `~/.oakgreen/mycelium/status.json`. @param {Record<string, string | undefined>} env @param {string} [home] */
+export const defaultStatusPath = (env, home = undefined) =>
+  env.MYCELIUM_STATUS || join(serviceDir('mycelium', { env, home }), 'status.json')
 
 /**
  * What a configured source reads, from its settings: no token, key, password or account.

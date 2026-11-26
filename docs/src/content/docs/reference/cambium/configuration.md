@@ -1,11 +1,15 @@
 ---
 title: cambium configuration
-description: The cambium config file, every key and default, and the target repository's "cambium" key.
+description: The "cambium" section of forest.json, every key and default, and the target repository's "cambium" key.
 sidebar:
   order: 2
 ---
 
-One JSON file: `--config`, else `$CAMBIUM_CONFIG`, else `~/.cambium/config.json`. Only `repos` is required.
+The `cambium` section of `forest.json`: `--config`, else `$OAKGREEN_FOREST_CONFIG_PATH`, else `~/.oakgreen/forest.json`. Only `repos` is required. Secrets never go here; they go in `~/.oakgreen/env`.
+
+No section while an old `~/.cambium` exists: cambium exits 1 and names `oakgreen config migrate`.
+
+The defaults below are the section's contents.
 
 ## Defaults
 
@@ -50,12 +54,12 @@ One JSON file: `--config`, else `$CAMBIUM_CONFIG`, else `~/.cambium/config.json`
     "causeRepo": null
   },
   "paths": {
-    "home": "~/.cambium",
-    "db": "~/.cambium/cambium.db",
-    "heartbeat": "~/.cambium/state.json",
-    "queues": "~/.cambium/queues.json",
-    "snapshots": "~/.cambium/snapshots.json",
-    "logs": "~/.cambium/logs"
+    "home": "~/.oakgreen/cambium",
+    "db": "~/.oakgreen/cambium/cambium.db",
+    "heartbeat": "~/.oakgreen/cambium/state.json",
+    "queues": "~/.oakgreen/cambium/queues.json",
+    "snapshots": "~/.oakgreen/cambium/snapshots.json",
+    "logs": "~/.oakgreen/cambium/logs"
   },
   "logs": { "keepPerIssue": 20, "daemonMaxBytes": 10485760 },
   "graft": { "command": "graft", "app": null, "botLogin": null },
@@ -68,7 +72,7 @@ One JSON file: `--config`, else `$CAMBIUM_CONFIG`, else `~/.cambium/config.json`
 
 ## Reloading
 
-The daemon re-reads the file before every tick. Changes to caps, limits, `tickSeconds`, `repos`, `priorityLabels`, `release` and `worker` apply without a restart (logged as `config reloaded: <keys>`).
+The daemon re-reads `forest.json` before every tick. Changes to caps, limits, `tickSeconds`, `repos`, `priorityLabels`, `release` and `worker` apply without a restart (logged as `config reloaded: <keys>`).
 
 `host`, `engine`, `paths`, `logs` and `graft` are fixed at start. A change logs `restart cambium to apply` once.
 
@@ -220,7 +224,7 @@ GC skips the checkout itself, worker worktrees and locked worktrees (a Claude Co
 
 | Key                    | Default                  | Meaning                                                 |
 | ---------------------- | ------------------------ | ------------------------------------------------------- |
-| `paths.home`           | `~/.cambium`             | Setting it moves every default path under it.           |
+| `paths.home`           | `~/.oakgreen/cambium`             | Setting it moves every default path under it.           |
 | `paths.db`             | `<home>/cambium.db`      | SQLite store: workers, mode, the daily cost ledger.     |
 | `paths.heartbeat`      | `<home>/state.json`      | [Heartbeat](/reference/cambium/heartbeat/) file.        |
 | `paths.queues`         | `<home>/queues.json`     | [Queue view](/reference/cambium/heartbeat/#queue-view-queuesjson) canopy reads. |

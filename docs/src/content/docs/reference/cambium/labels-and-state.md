@@ -91,7 +91,7 @@ Both engines add `cost` once an issue's first worker has exited with a `result` 
   "triage": { "usd": 0.6, "…": "…", "runs": 1 },
   "task":   { "usd": 5.5, "…": "…", "runs": 2 },
   "rescue": { "usd": 0, "…": "…", "runs": 0 },
-  "lastLog": "/Users/me/.cambium/logs/o__r/issue-12/a2-….out.log"
+  "lastLog": "/Users/me/.oakgreen/cambium/logs/o__r/issue-12/a2-….out.log"
 }
 ```
 

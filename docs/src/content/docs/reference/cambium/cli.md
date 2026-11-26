@@ -7,7 +7,7 @@ sidebar:
 
 `cambium` is published as `@oakgreencc/cambium`. It needs Node ≥ 22.13 (`node:sqlite`) and `graft` on `PATH`.
 
-Every command takes `--config <file>`. Default: `$CAMBIUM_CONFIG`, then `~/.cambium/config.json`.
+Every command takes `--config <file>`: the `forest.json` whose `cambium` section is the config. Default: `$OAKGREEN_FOREST_CONFIG_PATH`, then `~/.oakgreen/forest.json`.
 
 ## Daemon and mode
 

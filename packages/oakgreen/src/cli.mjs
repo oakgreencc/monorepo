@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { parseArgs } from 'node:util'
 import { withEnvFile } from '@oakgreencc/mycelium/envfile'
 import { doctorOk, formatDoctor, runDoctor } from './doctor.mjs'
+import { runMigrate } from './migrate.mjs'
 import { graftGithub } from './github.mjs'
 import { createProxy, DEFAULT_PORT as PROXY_PORT, installProxy, loadRoutes } from './proxy.mjs'
 import { runServices } from './services.mjs'
@@ -23,11 +24,14 @@ const USAGE = `oakgreen ${PKG.version} — the oakgreen stack in one command
   oakgreen restart [service...] new process for each (default: all installed), e.g. after an npm update
   oakgreen reload [service...]  also re-read each agent's plist (its env), waiting for the old one to stop
   oakgreen update [--check]     install the latest oakgreen (and its tools), restart running services, then doctor
-  oakgreen proxy [--port n]     serve http://<name>.localhost/ (canopy, jaeger, ~/.oakgreen/proxy.json) on :80
+  oakgreen proxy [--port n]     serve http://<name>.localhost/ (canopy, jaeger, forest.json's proxy routes) on :80
   oakgreen proxy install [--port n] [--dry-run]   write its launchd agent (oakgreen start does this)
   oakgreen <tool> [args...]     run ${Object.keys(TOOLS).join(', ')}
 
---config is cambium's config (default $CAMBIUM_CONFIG, then ~/.cambium/config.json).
+  oakgreen config migrate [--dry-run]   move this machine's old per-service files into ~/.oakgreen
+
+--config is forest.json (default $OAKGREEN_FOREST_CONFIG_PATH, then ~/.oakgreen/forest.json): the stack's config,
+one section per service. Secrets live in ~/.oakgreen/env (0600); state and logs in ~/.oakgreen/<service>/.
 `
 
 /**
@@ -142,6 +146,22 @@ export async function main(argv, ports = {}) {
       stderr,
     )
   }
+  if (verb === 'config') {
+    const [sub, ...flags] = rest
+    const bad = flags.filter((f) => f !== '--dry-run')
+    if (sub !== 'migrate' || bad.length) {
+      stderr(`usage: oakgreen config migrate [--dry-run]\n`)
+      return 2
+    }
+    return runMigrate({
+      home,
+      env,
+      dryRun: flags.includes('--dry-run'),
+      exec,
+      uid: ports.uid ?? process.getuid?.() ?? 0,
+      print: (line) => stdout(`${line}\n`),
+    })
+  }
   if (verb === 'proxy')
     return proxyCommand(rest, { home, env, stdout, stderr, write: ports.write, listen: ports.listen })
   if (verb === 'update') {
@@ -192,8 +212,13 @@ export async function main(argv, ports = {}) {
     return 0
   }
   const github = ports.github ?? graftGithub((tool, args) => runTool(tool, args, { cwd }))
-  // mycelium's settings file counts as its environment, as it does for mycelium itself.
-  const shared = { env: withEnvFile(env, { home }).env, home, cwd, config: values.config, repo: values.repo, github }
+  // mycelium's settings (forest.json, ~/.oakgreen/env) count as its environment, as they do for mycelium itself.
+  // A machine not yet migrated, or a broken forest.json, is doctor's to report: the plain environment stands in.
+  let merged = env
+  try {
+    merged = withEnvFile(env, { home, config: values.config }).env
+  } catch {}
+  const shared = { env: merged, home, cwd, config: values.config, repo: values.repo, github }
 
   if (verb === 'doctor') {
     const checks = await runDoctor({
@@ -256,7 +281,14 @@ async function proxyCommand(args, { home, env, stdout, stderr, write, listen = s
       out: stdout,
     })
   }
-  const { routes, errors } = loadRoutes(home)
+  let loaded
+  try {
+    loaded = loadRoutes({ home, env })
+  } catch (err) {
+    stderr(`oakgreen proxy: ${/** @type {Error} */ (err).message}\n`)
+    return 1
+  }
+  const { routes, errors } = loaded
   for (const e of errors) stderr(`oakgreen proxy: ${e}\n`)
   const server = createProxy({ routes, port })
   const suffix = port === 80 ? '' : `:${port}`

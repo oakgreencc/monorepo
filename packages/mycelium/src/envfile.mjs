@@ -1,51 +1,107 @@
 // @ts-check
 /**
- * mycelium's settings file: `KEY=value` lines, the same keys as the environment. It keeps credentials out of the
- * launchd plist and out of shell profiles. The process environment wins over the file.
+ * mycelium's settings: the `MYCELIUM_*` environment variables, read from three places. The process environment wins
+ * over `~/.oakgreen/env` (secrets, `KEY=value`), which wins over forest.json's `mycelium` section (everything else).
+ *
+ * The section holds the same settings in camelCase without the prefix: `"repo"` is `MYCELIUM_REPO`,
+ * `"discordChannels"` is `MYCELIUM_DISCORD_CHANNELS`. Values are strings, numbers or booleans; a list joins with
+ * commas. A credential named there is refused: it belongs in `~/.oakgreen/env`.
  */
 import { existsSync, readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { assertMigrated, envFilePath, forestPath, readEnvFile, readForest, sectionOf } from './forest.mjs'
+
+export { envFilePath, parseEnvFile } from './forest.mjs'
 
 /** @typedef {Record<string, string | undefined>} Env */
 
-/** `$MYCELIUM_ENV`, else `~/.mycelium/env`. @param {Env} env @param {string} [home] */
-export const envFilePath = (env, home = env.HOME || homedir()) => env.MYCELIUM_ENV || join(home, '.mycelium', 'env')
+/** Credentials: only ever in `~/.oakgreen/env` (or the environment). */
+export const SECRET_KEYS = Object.freeze([
+  'MYCELIUM_DISCORD_TOKEN',
+  'MYCELIUM_ASC_KEY_ID',
+  'MYCELIUM_ASC_ISSUER_ID',
+  'MYCELIUM_ASC_KEY_P8',
+  'MYCELIUM_PLAY_KEY_JSON',
+  'MYCELIUM_DEVICELOG_USER',
+  'MYCELIUM_DEVICELOG_PASSWORD',
+  'MYCELIUM_DEVICELOG_TOTP_SECRET',
+])
+
+/** What forest.json's `mycelium` section may hold. */
+export const SETTING_KEYS = Object.freeze([
+  'MYCELIUM_REPO',
+  'MYCELIUM_STATE',
+  'MYCELIUM_STATUS',
+  'MYCELIUM_BACKFILL_HOURS',
+  'MYCELIUM_NOTIFY_INTERVAL_S',
+  'MYCELIUM_DISCORD_CHANNELS',
+  'MYCELIUM_DISCORD_GUILD',
+  'MYCELIUM_DISCORD_NOTIFY',
+  'MYCELIUM_ASC_APP_ID',
+  'MYCELIUM_PLAY_PACKAGE',
+  'MYCELIUM_PLAY_KEY_PATH',
+  'MYCELIUM_DISCORD_INTERVAL_S',
+  'MYCELIUM_ASC_INTERVAL_S',
+  'MYCELIUM_TESTFLIGHT_INTERVAL_S',
+  'MYCELIUM_PLAY_INTERVAL_S',
+  'MYCELIUM_VITALS_INTERVAL_S',
+  'MYCELIUM_DEVICELOG_API',
+  'MYCELIUM_DEVICELOG_CLIENT_ID',
+  'MYCELIUM_DEVICELOG_POOL_ID',
+  'MYCELIUM_DEVICELOG_STAGE',
+  'MYCELIUM_DEVICELOG_CRASHES',
+  'MYCELIUM_DEVICELOG_INTERVAL_S',
+])
+
+/** `discordChannels` → `MYCELIUM_DISCORD_CHANNELS`. @param {string} key */
+export const envKeyOf = (key) => `MYCELIUM_${key.replace(/([A-Z])/g, '_$1').toUpperCase()}`
+
+/** `MYCELIUM_DISCORD_CHANNELS` → `discordChannels`. @param {string} name */
+export const forestKeyOf = (name) =>
+  name
+    .replace(/^MYCELIUM_/, '')
+    .toLowerCase()
+    .replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase())
 
 /**
- * Dotenv lines: `#` comments, an optional `export `, values bare, `"double"` or `'single'` quoted (a shell
- * `'\''` inside single quotes is a literal quote, as `set -a; . file` would read it).
- *
- * @param {string} text @returns {Record<string, string>}
+ * forest.json's `mycelium` section as environment variables. Throws on a credential or a key mycelium does not know.
+ * @param {Record<string, unknown>} section @returns {Record<string, string>}
  */
-export function parseEnvFile(text) {
+export function sectionEnv(section) {
   /** @type {Record<string, string>} */
   const out = {}
-  for (const raw of text.split(/\r?\n/)) {
-    const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(raw)
-    if (!m) continue
-    let v = m[2].trim()
-    if (v.length >= 2 && v.startsWith("'") && v.endsWith("'")) v = v.slice(1, -1).replaceAll("'\\''", "'")
-    else if (v.length >= 2 && v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1).replace(/\\(["\\$`])/g, '$1')
-    out[m[1]] = v
+  for (const [key, value] of Object.entries(section)) {
+    const name = envKeyOf(key)
+    if (SECRET_KEYS.includes(name))
+      throw new Error(`forest.json: mycelium.${key} is a credential; set ${name} in ~/.oakgreen/env instead`)
+    if (!SETTING_KEYS.includes(name)) throw new Error(`forest.json: mycelium.${key} is not a mycelium setting`)
+    if (Array.isArray(value)) out[name] = value.map(String).join(',')
+    else if (['string', 'number', 'boolean'].includes(typeof value)) out[name] = String(value)
+    else throw new Error(`forest.json: mycelium.${key} must be a string, number, boolean or list`)
   }
   return out
 }
 
 /**
- * The environment with the settings file underneath it; `file` is the path read, or null when there is none.
+ * The environment over `~/.oakgreen/env` over forest.json's `mycelium` section. `file` is the env file read, or
+ * null when there is none. Throws on a machine still holding `~/.mycelium` (run `oakgreen config migrate`).
  *
- * @param {Env} env @param {{ home?: string, read?: (p: string) => string | null }} [o]
- * @returns {{ env: Env, file: string | null }}
+ * @param {Env} env
+ * @param {{ home?: string, config?: string, read?: (p: string) => string | null, exists?: (p: string) => boolean }} [o]
+ * @returns {{ env: Env, file: string | null, forest: string }}
  */
 export function withEnvFile(env, o = {}) {
-  const path = envFilePath(env, o.home)
+  const where = { env, home: o.home }
   const read = o.read ?? ((p) => (existsSync(p) ? readFileSync(p, 'utf8') : null))
-  const text = read(path)
-  if (text == null) return { env, file: null }
-  const fromFile = parseEnvFile(text)
+  const path = forestPath(o.config, where)
+  const { forest } = readForest(path, read)
+  assertMigrated('mycelium', forest, where, o.exists ?? existsSync)
+  const file = readEnvFile(where, read)
   /** @type {Env} */
-  const merged = { ...fromFile }
+  const merged = { ...sectionEnv(sectionOf(forest, 'mycelium')), ...file.values }
   for (const [k, v] of Object.entries(env)) if (v !== undefined && v !== '') merged[k] = v
-  return { env: merged, file: path }
+  return { env: merged, file: file.present ? file.path : null, forest: path }
 }
+
+/** Where `mycelium install` tells you to put settings. @param {Env} env @param {string} [home] */
+export const settingsHint = (env, home) =>
+  `forest.json's "mycelium" section (${forestPath(undefined, { env, home })}), credentials in ${envFilePath({ env, home })}`

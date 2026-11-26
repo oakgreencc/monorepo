@@ -1,17 +1,18 @@
 // @ts-check
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { envFilePath, legacyPaths, MIGRATE } from '@oakgreencc/mycelium/forest'
 import { LABEL_GUIDE_PATH } from './label-guide.mjs'
 import {
   QUEUE_LABELS,
-  cambiumConfigPath,
   configuredRepos,
+  forestConfigPath,
   gitRoot,
   heartbeatFreshness,
   heartbeatPath,
   myceliumSources,
   projectConfigSource,
-  readCambiumConfig,
+  readForestFile,
 } from './stack.mjs'
 
 /**
@@ -108,14 +109,15 @@ export async function runDoctor(ctx) {
     ),
   )
 
-  const configFile = cambiumConfigPath(ctx)
-  const cambium = readCambiumConfig(configFile)
+  const configFile = forestConfigPath(ctx)
+  const cambium = readForestFile(configFile)
+  checks.push(...machineChecks(ctx, configFile, cambium))
   checks.push(
     check(
       'cambium config',
-      cambium.present && !cambium.error,
-      cambium.error ? `${configFile}: ${cambium.error}` : cambium.present ? configFile : `missing ${configFile}`,
-      cambium.error ? `fix the JSON in ${configFile}` : 'oakgreen setup',
+      cambium.present,
+      cambium.present ? `"cambium" in ${configFile}` : `no "cambium" section in ${configFile}`,
+      'oakgreen setup',
     ),
   )
 
@@ -158,6 +160,34 @@ export async function runDoctor(ctx) {
     ),
   )
   return checks
+}
+
+/**
+ * forest.json parses, `~/.oakgreen/env` is the owner's alone (0600), and no pre-forest file is left.
+ * @param {Context} ctx @param {string} file @param {ReturnType<typeof readForestFile>} forest @returns {Check[]}
+ */
+export function machineChecks(ctx, file, forest) {
+  const where = { home: ctx.home, env: ctx.env }
+  const envFile = envFilePath(where)
+  const mode = existsSync(envFile) ? statSync(envFile).mode & 0o777 : null
+  const old = Object.values(legacyPaths(where))
+    .flat()
+    .filter((p) => existsSync(p))
+  return [
+    check(
+      'forest.json',
+      forest.exists && !forest.error,
+      forest.error ? `${file}: ${forest.error}` : forest.exists ? file : `missing ${file}`,
+      forest.error ? `fix the JSON in ${file}` : 'oakgreen setup',
+    ),
+    check(
+      'env file',
+      mode === null || mode === 0o600,
+      mode === null ? `no ${envFile} (no secrets set)` : `${envFile} mode ${mode.toString(8).padStart(4, '0')}`,
+      `chmod 600 ${envFile}`,
+    ),
+    check('old paths', old.length === 0, old.length ? `still there: ${old.join(', ')}` : 'none left', MIGRATE),
+  ]
 }
 
 /**

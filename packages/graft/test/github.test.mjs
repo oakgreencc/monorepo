@@ -97,7 +97,7 @@ test('download: the body as bytes, authenticated; a refusal carries its status',
 
 test('explain blames the App credentials only for a missing credential file', () => {
   const enoent = (/** @type {string} */ path) => new Error(`ENOENT: no such file or directory, open '${path}'`)
-  const env = { GRAFT_HOME: '/home/a/.config/graft' }
+  const env = { GRAFT_HOME: '/home/a/.oakgreen/graft' }
   const apps = join(env.GRAFT_HOME, 'apps', 'my-app')
   assert.equal(explain(enoent('.claude/scratch/body.md'), env), null)
   assert.equal(explain(enoent('/tmp/private-key.pem'), env), null) // the name alone is not enough

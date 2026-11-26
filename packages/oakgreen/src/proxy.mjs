@@ -16,6 +16,7 @@ import { createServer, request } from 'node:http'
 import { connect } from 'node:net'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { assertMigrated, forestPath, readForest, sectionOf, serviceDir } from '@oakgreencc/mycelium/forest'
 
 export const LABEL = 'com.oakgreencc.proxy'
 export const DEFAULT_PORT = 80
@@ -23,35 +24,44 @@ export const DEFAULT_ROUTES = Object.freeze({ canopy: 4317, jaeger: 16686 })
 
 /** @typedef {Record<string, number>} Routes name → loopback port */
 
-export const configPath = (/** @type {string} */ home) => join(home, '.oakgreen', 'proxy.json')
-export const logPath = (/** @type {string} */ home) => join(home, '.oakgreen', 'logs', 'proxy.log')
+export const logPath = (/** @type {string} */ home) => join(serviceDir('proxy', { home }), 'logs', 'proxy.log')
 export const plistPath = (/** @type {string} */ home) => join(home, 'Library', 'LaunchAgents', `${LABEL}.plist`)
 
 const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 
 /**
- * Defaults, overlaid by `~/.oakgreen/proxy.json` `{ "routes": { "<name>": <port> | null } }` (null drops one).
- * @param {string} home @param {(p: string) => string | null} [read] @returns {{ routes: Routes, errors: string[] }}
+ * Defaults, overlaid by forest.json's `proxy` section `{ "routes": { "<name>": <port> | null } }` (null drops one).
+ * Throws on a machine still holding `~/.oakgreen/proxy.json` with no section (run `oakgreen config migrate`).
+ * @param {{ home: string, env?: Record<string, string | undefined>, read?: (p: string) => string | null,
+ *   exists?: (p: string) => boolean }} o
+ * @returns {{ routes: Routes, errors: string[] }}
  */
-export function loadRoutes(home, read = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : null)) {
+export function loadRoutes({
+  home,
+  env = {},
+  read = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : null),
+  exists = existsSync,
+}) {
   /** @type {Routes} */
   const routes = { ...DEFAULT_ROUTES }
   const errors = []
-  const path = configPath(home)
-  const text = read(path)
-  if (text === null) return { routes, errors }
+  const path = forestPath(undefined, { env, home })
   let cfg
   try {
-    cfg = JSON.parse(text)
+    const { forest } = readForest(path, read)
+    assertMigrated('proxy', forest, { env, home }, exists)
+    cfg = sectionOf(forest, 'proxy')
   } catch (err) {
-    return { routes, errors: [`${path}: ${/** @type {Error} */ (err).message}`] }
+    const message = /** @type {Error} */ (err).message
+    if (/oakgreen config migrate/.test(message)) throw err
+    return { routes, errors: [message] }
   }
   for (const [name, port] of Object.entries(cfg?.routes ?? {})) {
     const n = name.toLowerCase()
-    if (!NAME.test(n)) errors.push(`${path}: route name '${name}' is not a DNS label`)
+    if (!NAME.test(n)) errors.push(`${path}: proxy route name '${name}' is not a DNS label`)
     else if (port === null) delete routes[n]
     else if (Number.isInteger(port) && port > 0 && port < 65536) routes[n] = port
-    else errors.push(`${path}: route '${name}' needs a port 1-65535, got ${JSON.stringify(port)}`)
+    else errors.push(`${path}: proxy route '${name}' needs a port 1-65535, got ${JSON.stringify(port)}`)
   }
   return { routes, errors }
 }
@@ -96,7 +106,7 @@ export function indexPage(routes, port) {
 <style>:root{color-scheme:light dark}body{font:15px/1.6 system-ui,sans-serif;max-width:40rem;margin:3rem auto;padding:0 1rem}span{opacity:.6}</style>
 <h1>oakgreen proxy</h1><ul>
 ${rows}
-</ul><p><span>Routes: defaults plus ~/.oakgreen/proxy.json.</span></p>\n`
+</ul><p><span>Routes: defaults plus the proxy section of ~/.oakgreen/forest.json.</span></p>\n`
 }
 
 /**

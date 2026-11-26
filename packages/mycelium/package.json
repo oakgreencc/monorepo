@@ -24,7 +24,8 @@
   "exports": {
     ".": "./src/index.mjs",
     "./envfile": "./src/envfile.mjs",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./forest": "./src/forest.mjs"
   },
   "bin": {
     "mycelium": "bin/mycelium.mjs"

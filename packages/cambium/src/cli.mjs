@@ -49,14 +49,15 @@ export const HELP = `cambium ${VERSION} — the scheduler daemon
                                         check the session's output for the current node against its schema,
                                         follow the edge, write the cambium:decide marker, print the next node
   cambium gc [--dry-run] [--repo <owner/name>]
-                                        remove worktrees GitHub holds all of; archive (to ~/.cambium/gc) then
+                                        remove worktrees GitHub holds all of; archive (to ~/.oakgreen/cambium/gc) then
                                         remove stale ones; skip live workers and live Claude Code sessions
   cambium install [--dry-run]           write the launchd agent (KeepAlive); --dry-run prints it
   cambium update [--check] [--version <v>]
                                         install the latest (or <v>) from npm into this global install, then
                                         restart the launchd agent onto it; --check only reports
 
-Common: --config <file> (default $CAMBIUM_CONFIG, then ~/.cambium/config.json)`
+Common: --config <file>: forest.json, whose "cambium" section is the config (default
+$OAKGREEN_FOREST_CONFIG_PATH, then ~/.oakgreen/forest.json)`
 
 /** @param {string[]} argv @param {string} name */
 const flag = (argv, name) => {
@@ -128,19 +129,25 @@ export async function main(argv, io) {
     }
   }
   const cfgPath = configPath(flag(rest, '--config'), io.env)
-  const config = loadConfig(cfgPath)
+  let config
+  try {
+    config = loadConfig(cfgPath, io.env)
+  } catch (err) {
+    return fail(io, /** @type {Error} */ (err).message)
+  }
   const depsFor = io.deps ?? ((c) => realDeps(c, { echo: io.out }))
 
   switch (verb) {
     case 'start': {
-      if (!config.repos.length) return fail(io, `no repos in ${cfgPath}; see the README for the config file`)
+      if (!config.repos.length)
+        return fail(io, `no repos in the "cambium" section of ${cfgPath}; see the README for the config`)
       const deps = depsFor(config)
       acquireLock(deps.store, deps.procs, deps.pid ?? process.pid)
       await withTelemetry(deps, io, () =>
         runDaemon(deps, {
           signal: io.signal,
           once: has(rest, '--once'),
-          reload: () => loadConfig(cfgPath),
+          reload: () => loadConfig(cfgPath, io.env),
           env: io.env,
         }),
       )
@@ -376,7 +383,8 @@ function install(cfgPath, config, io, dryRun) {
     io.out(`# would write ${target}\n${text}`)
     return 0
   }
-  if (!config.repos.length) return fail(io, `no repos in ${cfgPath}; write the config first (README)`)
+  if (!config.repos.length)
+    return fail(io, `no repos in the "cambium" section of ${cfgPath}; write the config first (README)`)
   if (!existsSync(cfgPath)) return fail(io, `${cfgPath} does not exist`)
   mkdirSync(dirname(target), { recursive: true })
   mkdirSync(config.paths.logs, { recursive: true })

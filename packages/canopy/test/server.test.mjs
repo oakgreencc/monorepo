@@ -162,10 +162,14 @@ test('hostnameOf strips port and brackets', () => {
   assert.equal(hostnameOf(undefined), '')
 })
 
-test('resolveSettings: --state, then config paths.heartbeat, then paths.home, then ~/.cambium', () => {
+test('resolveSettings: --state, then canopy.state, then cambium paths.heartbeat, then paths.home, then ~/.oakgreen/cambium', () => {
   const files = /** @type {Record<string, string>} */ ({
-    '/c/hb.json': JSON.stringify({ paths: { heartbeat: '~/x/state.json' }, repos: [{ slug: REPO }] }),
-    '/c/home.json': JSON.stringify({ paths: { home: '/srv/cambium' } }),
+    '/c/hb.json': JSON.stringify({ cambium: { paths: { heartbeat: '~/x/state.json' }, repos: [{ slug: REPO }] } }),
+    '/c/home.json': JSON.stringify({ cambium: { paths: { home: '/srv/cambium' } } }),
+    '/c/own.json': JSON.stringify({
+      canopy: { state: '/own/state.json', repos: ['c/d'] },
+      cambium: { paths: { heartbeat: '/hb.json' }, repos: [{ slug: REPO }] },
+    }),
   })
   const read = (/** @type {string} */ p) => {
     if (!(p in files)) throw Object.assign(new Error(`ENOENT: ${p}`), { code: 'ENOENT' })
@@ -173,21 +177,26 @@ test('resolveSettings: --state, then config paths.heartbeat, then paths.home, th
   }
   const deps = { home: '/home/me', read, env: {} }
   assert.equal(resolveSettings({ state: '/s.json', config: '/c/hb.json' }, deps).statePath, '/s.json')
-  const fromCfg = resolveSettings({}, { ...deps, env: { CAMBIUM_CONFIG: '/c/hb.json' } })
+  const fromCfg = resolveSettings({}, { ...deps, env: { OAKGREEN_FOREST_CONFIG_PATH: '/c/hb.json' } })
   assert.equal(fromCfg.statePath, '/home/me/x/state.json')
   assert.deepEqual(fromCfg.repos, [REPO])
   assert.equal(resolveSettings({ config: '/c/home.json' }, deps).statePath, '/srv/cambium/state.json')
+  const own = resolveSettings({ config: '/c/own.json' }, deps)
+  assert.equal(own.statePath, '/own/state.json', "canopy's own section beats cambium's")
+  assert.deepEqual(own.repos, ['c/d'])
+  assert.equal(resolveSettings({ state: '/s.json', config: '/c/own.json' }, deps).statePath, '/s.json')
   const dflt = resolveSettings({}, deps)
-  assert.equal(dflt.statePath, '/home/me/.cambium/state.json')
+  assert.equal(dflt.statePath, '/home/me/.oakgreen/cambium/state.json')
+  assert.equal(dflt.configPath, '/home/me/.oakgreen/forest.json')
   assert.equal(dflt.configError, null)
-  assert.match(String(resolveSettings({ config: '/c/missing.json' }, deps).configError), /ENOENT/)
+  assert.match(String(resolveSettings({ config: '/c/missing.json' }, deps).configError), /not found/)
   assert.deepEqual(resolveSettings({ repos: ['a/b', 'a/b'] }, deps).repos, ['a/b'])
   assert.throws(() => resolveSettings({ repos: ['nope'] }, deps), /owner\/name/)
 })
 
 test('cli: defaults to 127.0.0.1:4317, honours --port/--host, rejects bad flags', () => {
   const client = { queues: async () => group(graphqlAnswer(), REPO) }
-  const quiet = { env: {}, client, out: () => {}, err: () => {} }
+  const quiet = { env: { HOME: '/nonexistent-home' }, client, out: () => {}, err: () => {} }
   const d = main(['--config', '/nonexistent/c.json'], quiet)
   assert.ok(typeof d === 'object')
   assert.deepEqual([d.host, d.port], ['127.0.0.1', 4317])
@@ -246,7 +255,9 @@ test('the page renders the copy command only from an item with a brief', async (
 })
 
 test('resolveSettings: briefs live under the cambium home; repo paths come from its config', () => {
-  const cfg = JSON.stringify({ paths: { home: '~/cam' }, repos: [{ slug: REPO, path: '~/src/mono' }, { slug: 'a/b' }] })
+  const cfg = JSON.stringify({
+    cambium: { paths: { home: '~/cam' }, repos: [{ slug: REPO, path: '~/src/mono' }, { slug: 'a/b' }] },
+  })
   const s = resolveSettings({ config: '/c.json' }, { env: {}, home: '/h', read: () => cfg })
   assert.equal(s.briefs.dir, '/h/cam/briefs')
   assert.deepEqual(s.briefs.paths, { [REPO]: '/h/src/mono' })

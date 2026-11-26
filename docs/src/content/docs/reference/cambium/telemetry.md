@@ -91,14 +91,14 @@ cambium's package ships `otel/`:
 
 | File                            | Contents                                                                                                   |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `otelcol.yaml`                  | otelcol-contrib config: OTLP/HTTP on `127.0.0.1:4318` → `~/.cambium/otel/{traces,metrics}.jsonl` and Jaeger. |
+| `otelcol.yaml`                  | otelcol-contrib config: OTLP/HTTP on `127.0.0.1:4318` → `~/.oakgreen/cambium/otel/{traces,metrics}.jsonl` and Jaeger. |
 | `otelcol-aws.yaml`              | Same receiver; traces to X-Ray's OTLP endpoint, metrics to Amazon Managed Service for Prometheus (`sigv4auth`). |
 | `com.oakgreencc.otelcol.plist`  | launchd agent `com.oakgreencc.otelcol`.                                                                    |
 
 | Path                              | Contents                                       |
 | --------------------------------- | ---------------------------------------------- |
-| `~/.cambium/otel/traces.jsonl`    | Spans, OTLP/JSON lines; read by canopy.        |
-| `~/.cambium/otel/metrics.jsonl`   | Metrics.                                       |
-| `~/.cambium/otel/otelcol.log`     | Collector log.                                 |
+| `~/.oakgreen/cambium/otel/traces.jsonl`    | Spans, OTLP/JSON lines; read by canopy.        |
+| `~/.oakgreen/cambium/otel/metrics.jsonl`   | Metrics.                                       |
+| `~/.oakgreen/cambium/logs/otelcol.log`     | Collector log.                                 |
 
 Jaeger, when run, takes OTLP/gRPC on `14317` and serves its UI on `16686`.

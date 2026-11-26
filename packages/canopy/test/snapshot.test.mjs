@@ -163,9 +163,11 @@ test('the issue pane still reads GitHub, through the cache: one ISSUE_QUERY per 
 test('resolveSettings: --queues, then config paths.queues, then <paths.home>/queues.json', async () => {
   const { resolveSettings } = await import('../src/config.mjs')
   const at = (/** @type {any} */ cfg, flags = {}) =>
-    resolveSettings({ config: '/c.json', ...flags }, { env: {}, home: '/h', read: () => JSON.stringify(cfg) })
-      .queuesPath
-  assert.equal(at({}), '/h/.cambium/queues.json')
+    resolveSettings(
+      { config: '/c.json', ...flags },
+      { env: {}, home: '/h', read: () => JSON.stringify({ cambium: cfg }) },
+    ).queuesPath
+  assert.equal(at({}), '/h/.oakgreen/cambium/queues.json')
   assert.equal(at({ paths: { home: '~/cam' } }), '/h/cam/queues.json')
   assert.equal(at({ paths: { queues: '~/q.json' } }), '/h/q.json')
   assert.equal(at({ paths: { queues: '~/q.json' } }, { queues: '/x.json' }), '/x.json')

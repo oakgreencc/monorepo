@@ -17,22 +17,29 @@ mycelium needs graft set up for the receiving repository, and that repository ne
 
    For vitals, also enable the Google Play Developer Reporting API in the Cloud project and give the account **View app information (read-only)** in Play Console.
 
-2. Write `~/.mycelium/env`, one `KEY=value` per line:
+2. Put the credentials in `~/.oakgreen/env`, one `KEY=value` per line, and keep it private:
 
    ```sh
-   MYCELIUM_REPO=owner/name
    MYCELIUM_DISCORD_TOKEN=...
-   MYCELIUM_DISCORD_CHANNELS=123456,forum:789012
-   MYCELIUM_DISCORD_GUILD=345678
    ```
-
-   `forum:<id>` marks a forum channel, which also needs `MYCELIUM_DISCORD_GUILD`. Every variable: [mycelium reference](/reference/mycelium/).
-
-3. Make it private:
 
    ```sh
-   chmod 600 ~/.mycelium/env
+   chmod 600 ~/.oakgreen/env
    ```
+
+3. Put everything else in the `mycelium` section of `~/.oakgreen/forest.json`:
+
+   ```json
+   {
+     "mycelium": {
+       "repo": "owner/name",
+       "discordChannels": ["123456", "forum:789012"],
+       "discordGuild": "345678"
+     }
+   }
+   ```
+
+   `forum:<id>` marks a forum channel, which also needs `discordGuild`. Every setting, and which ones are credentials: [mycelium reference](/reference/mycelium/).
 
 4. Preview each source. This plans issues and writes nothing:
 
@@ -46,11 +53,11 @@ mycelium needs graft set up for the receiving repository, and that repository ne
    oakgreen start mycelium
    ```
 
-6. Check: `oakgreen doctor` shows a passing `mycelium <source>` line per source, and `~/.mycelium/logs/mycelium.log` starts with a `mycelium up:` line naming the repository and sources.
+6. Check: `oakgreen doctor` shows a passing `mycelium <source>` line per source, and `~/.oakgreen/mycelium/logs/mycelium.log` starts with a `mycelium up:` line naming the repository and sources.
 
 ## Answer reporters on Discord
 
-Set `MYCELIUM_DISCORD_NOTIFY=true`, then `oakgreen restart mycelium`. Reporters get one message when their issue is filed and one when it closes.
+Set `"discordNotify": true` in the `mycelium` section, then `oakgreen restart mycelium`. Reporters get one message when their issue is filed and one when it closes.
 
 ## Collect test-track feedback from Play
 

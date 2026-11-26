@@ -7,7 +7,7 @@ sidebar:
 
 Rescue needs the graph engine.
 
-1. Turn it on in `~/.cambium/config.json`:
+1. Turn it on in the `cambium` section of `~/.oakgreen/forest.json`:
 
    ```json
    {

@@ -20,7 +20,7 @@ Package: `@oakgreencc/mycelium`. Node ≥ 22. Dependencies: OpenTelemetry only. 
 
 `--dry-run` prints one JSON line per envelope with the planned action (`create` with title, body and labels, or `comment` with the issue number). No GitHub writes, no cursor moves.
 
-The agent's plist holds only `PATH` (captured at install), `HOME` and `MYCELIUM_ENV`; never credentials. Log: `~/.mycelium/logs/mycelium.log`.
+The agent's plist holds only `PATH` (captured at install), `HOME` and an explicit `OAKGREEN_FOREST_CONFIG_PATH`; never settings or credentials. Log: `~/.oakgreen/mycelium/logs/mycelium.log`.
 
 ## Sources
 
@@ -56,30 +56,35 @@ All source requests are GETs, plus Google's OAuth token exchange and the Cognito
 
 ## Settings
 
-Read from the environment, over the settings file `$MYCELIUM_ENV` (default `~/.mycelium/env`): `KEY=value` lines, `#` comments, values bare or quoted. The environment wins.
+Read from three places, highest first:
+
+1. The environment.
+2. `~/.oakgreen/env`: credentials (marked †), `KEY=value` lines, `#` comments, values bare or quoted. Mode 600.
+3. The `mycelium` section of `~/.oakgreen/forest.json`: every other setting, in camelCase without the prefix (`repo` for `MYCELIUM_REPO`, `discordChannels` for `MYCELIUM_DISCORD_CHANNELS`). A list joins with commas.
+
+A credential or an unknown key in `forest.json` is refused. No `mycelium` section while `~/.mycelium` is still there: mycelium exits 1 and names `oakgreen config migrate`.
 
 | Variable | Meaning |
 | --- | --- |
-| `MYCELIUM_ENV` | Settings file. Environment only. |
 | `MYCELIUM_REPO` | `owner/name` that receives intents (or `--repo`). |
 | `MYCELIUM_STATE` | Cursor file (or `--state`). |
-| `MYCELIUM_STATUS` | Status file, default `~/.mycelium/status.json`. |
+| `MYCELIUM_STATUS` | Status file, default `~/.oakgreen/mycelium/status.json`. |
 | `MYCELIUM_BACKFILL_HOURS` | First-run window. Default 24. |
 | `MYCELIUM_<SOURCE>_INTERVAL_S` | `run` interval per source (`DISCORD`, `ASC`, `TESTFLIGHT`, `PLAY`, `VITALS`, `DEVICELOG`). |
 | `MYCELIUM_NOTIFY_INTERVAL_S` | Notifier interval in `run`. Default 60. |
-| `MYCELIUM_DISCORD_TOKEN` | Bot token. |
+| `MYCELIUM_DISCORD_TOKEN` † | Bot token. |
 | `MYCELIUM_DISCORD_CHANNELS` | Comma list of channel ids; `forum:<id>` for a forum channel. |
 | `MYCELIUM_DISCORD_GUILD` | Guild id. Required for forum channels. |
 | `MYCELIUM_DISCORD_NOTIFY` | `true` answers Discord reporters. |
-| `MYCELIUM_ASC_KEY_ID`, `MYCELIUM_ASC_ISSUER_ID` | App Store Connect API key, shared by `asc` and `testflight`. |
-| `MYCELIUM_ASC_KEY_P8` | The `.p8` PEM, or its base64. |
+| `MYCELIUM_ASC_KEY_ID`, `MYCELIUM_ASC_ISSUER_ID` † | App Store Connect API key, shared by `asc` and `testflight`. |
+| `MYCELIUM_ASC_KEY_P8` † | The `.p8` PEM, or its base64. |
 | `MYCELIUM_ASC_APP_ID` | The app's numeric App Store Connect id. |
 | `MYCELIUM_PLAY_PACKAGE` | Android package name (`play` and `vitals`). |
-| `MYCELIUM_PLAY_KEY_JSON` / `MYCELIUM_PLAY_KEY_PATH` | Service-account key, inline or as a path. |
+| `MYCELIUM_PLAY_KEY_JSON` † / `MYCELIUM_PLAY_KEY_PATH` | Service-account key, inline or as a path. |
 | `MYCELIUM_DEVICELOG_API` | Device Log API base; `/v3` is added unless present. |
 | `MYCELIUM_DEVICELOG_POOL_ID`, `MYCELIUM_DEVICELOG_CLIENT_ID` | Cognito user pool and app client. |
-| `MYCELIUM_DEVICELOG_USER`, `MYCELIUM_DEVICELOG_PASSWORD` | Log reader sign-in. |
-| `MYCELIUM_DEVICELOG_TOTP_SECRET` | Log reader's base32 TOTP secret. |
+| `MYCELIUM_DEVICELOG_USER`, `MYCELIUM_DEVICELOG_PASSWORD` † | Log reader sign-in. |
+| `MYCELIUM_DEVICELOG_TOTP_SECRET` † | Log reader's base32 TOTP secret. |
 | `MYCELIUM_DEVICELOG_STAGE` | Stage in the identity. Default `prod`. |
 | `MYCELIUM_DEVICELOG_CRASHES` | `true` also files `kind: crash` logs, grouped by signature. |
 
@@ -132,11 +137,11 @@ An intent closed before acknowledgement gets only the outcome. What was posted i
 
 ## State
 
-One cursor per source in `$MYCELIUM_STATE`, else `$XDG_STATE_HOME/mycelium/state.json`, else `~/.local/state/mycelium/state.json`. The cursor moves after each envelope is filed. With no cursor, a source starts `MYCELIUM_BACKFILL_HOURS` back.
+One cursor per source in `$MYCELIUM_STATE`, else `~/.oakgreen/mycelium/state.json`. The cursor moves after each envelope is filed. With no cursor, a source starts `MYCELIUM_BACKFILL_HOURS` back.
 
 ## Status file
 
-`mycelium run` writes `$MYCELIUM_STATUS`, else `~/.mycelium/status.json`, at start, after every pass and at a clean stop. canopy's Intake tab reads it. It holds no credentials. `--dry-run` writes none.
+`mycelium run` writes `$MYCELIUM_STATUS`, else `~/.oakgreen/mycelium/status.json`, at start, after every pass and at a clean stop. canopy's Intake tab reads it. It holds no credentials. `--dry-run` writes none.
 
 | Field | Shape |
 | --- | --- |

@@ -54,7 +54,7 @@ Repository admins may bypass it, through pull requests only (so a solo
 maintainer can merge their own PR); the App never can.
 
 Without `gh` logged in as a repository admin, setup writes the ruleset to
-`~/.config/graft/rulesets/<owner>-<repo>-<base>.json` instead: import it at
+`~/.oakgreen/graft/rulesets/<owner>-<repo>-<base>.json` instead: import it at
 Settings → Rules → New ruleset → **Import a ruleset**
 (`https://github.com/<owner>/<repo>/settings/rules`).
 
