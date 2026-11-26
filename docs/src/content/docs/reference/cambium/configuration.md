@@ -171,12 +171,18 @@ Hosted decisions: cambium walks a person through a `q:human` issue labelled `ask
 
 | Key          | Default | Meaning |
 | ------------ | ------- | ------- |
-| `channel`    | `null`  | `null` (off) or `"github"`: rounds of questions and the draft are posted as issue comments, and replies are read from comments. |
-| `answerers`  | `{}`    | Per channel, the logins whose replies count: `{ "github": ["ana", "james"] }`. Case-insensitive. The channel in use needs at least one. Anyone else's reply is ignored and noted in the decision's marker. |
+| `channel`    | `null`  | `null` (off), `"github"` or `"discord"`. `github`: rounds of questions and the draft are posted as issue comments, and replies are read from comments. `discord`: they are posted to a thread per issue in mycelium's decisions channel, and replies are read from that thread. The decision's marker and its result stay on the GitHub issue. |
+| `answerers`  | `{}`    | Per channel, who may answer: `{ "github": ["ana", "james"], "discord": ["ana", "123456789012345678"] }`. GitHub logins; for `discord`, Discord usernames or user IDs. Case-insensitive. The channel in use needs at least one. Anyone else's reply is ignored and noted in the decision's marker. |
 | `idleHours`  | `24`    | No reply for this long pauses the decision until the next one. |
 
 ```json
 "decide": { "channel": "github", "answerers": { "github": ["james"] } }
+```
+
+`"discord"` needs mycelium running with its broker on: set `MYCELIUM_DECISIONS_CHANNEL` to the decisions channel's ID, and keep that channel out of `MYCELIUM_DISCORD_CHANNELS`. cambium reaches Discord only through mycelium and needs no Discord token.
+
+```json
+"decide": { "channel": "discord", "answerers": { "discord": ["james"] } }
 ```
 
 ## Clocks

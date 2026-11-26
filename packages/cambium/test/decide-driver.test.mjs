@@ -7,7 +7,16 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { resolveConfig } from '../src/config.mjs'
-import { decidePrompt, githubChannel, hosted, parsePostTag, seedOf } from '../src/decide-driver.mjs'
+import {
+  CHANNELS,
+  decidePrompt,
+  discordChannel,
+  githubChannel,
+  hosted,
+  parsePostTag,
+  seedOf,
+  topicOf,
+} from '../src/decide-driver.mjs'
 import { END } from '../src/graph/index.mjs'
 import { parseDecideMarker, startOf } from '../src/graphs/decide.mjs'
 import { parseAnswer } from '../src/human-reply.mjs'
@@ -30,6 +39,7 @@ const ASK = {
   lens: 'product',
 }
 
+const TP = '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01'
 const DECIDE = { channel: 'github', answerers: { github: ['james'] }, idleHours: 24 }
 const CONFIG = { engine: 'graph', graft: { botLogin: 'cambium[bot]' }, decide: DECIDE }
 
@@ -95,7 +105,7 @@ const resultLog = (json) =>
  * process: nothing carries over but GitHub.
  * @param {ReturnType<typeof harness>} h @param {number} now
  */
-function processOver(h, now) {
+function processOver(h, now, broker = undefined) {
   const procs = fakeProcs()
   const spawner = fakeSpawner(procs)
   const clock = fakeClock(now)
@@ -110,6 +120,7 @@ function processOver(h, now) {
     log: (/** @type {any} */ level, /** @type {string} */ msg, where = {}) => events.push({ level, msg, ...where }),
     events: () => events,
     heartbeat: undefined,
+    ...(broker ? { broker } : {}),
   }
   h.gh.commentClock.now = () => clock.now()
   /** Every running decide worker exits with the fixture agent's step, read from its prompt alone. */
@@ -132,15 +143,18 @@ function processOver(h, now) {
 }
 
 /** The fixture issue: in the Human Queue for a session decision, its ask in the state comment. */
-function fixture() {
+function fixture(config = CONFIG) {
   const h = harness({
-    config: CONFIG,
+    config,
     issues: [
       {
         number: N,
         title: 'Map-page redesign',
         labels: ['q:human', 'why:triage', 'ask:decide', 'ask:session'],
-        comment: { id: 1, body: renderMarker(newMarker({ node: 'to-human', ask: /** @type {any} */ (ASK) })) },
+        comment: {
+          id: 1,
+          body: renderMarker({ ...newMarker({ node: 'to-human', ask: /** @type {any} */ (ASK) }), traceparent: TP }),
+        },
         comments: [
           { id: 10, author: 'james', bot: false, createdAt: new Date(T0 - 60 * MIN).toISOString(), body: 'older talk' },
         ],
@@ -367,8 +381,30 @@ test('config: decide channels and the allowlist', () => {
     /decide.answerers.github needs at least one login/,
   )
   assert.throws(
-    () => resolveConfig({ ...base, decide: { channel: 'discord', answerers: { discord: ['x'] } } }),
-    /must be "github" or null/,
+    () => resolveConfig({ ...base, decide: { channel: 'discord' } }),
+    /answerers.discord needs at least one login/,
+  )
+  assert.throws(
+    () => resolveConfig({ ...base, decide: { channel: 'slack', answerers: { slack: ['x'] } } }),
+    /must be "github", "discord" or null/,
+  )
+  assert.throws(
+    () => resolveConfig({ ...base, decide: { channel: 'discord', answerers: { discord: ['no spaces'] } } }),
+    /"no spaces" is not a Discord username/,
+  )
+  for (const channel of CHANNELS)
+    assert.equal(
+      resolveConfig({ ...base, decide: { channel, answerers: { [channel]: ['james'] } } }).decide.channel,
+      channel,
+    )
+  assert.equal(
+    resolveConfig({
+      ...base,
+      repos: [
+        { slug: SLUG, path: '/repo', decide: { channel: 'discord', answerers: { discord: ['123456789012345678'] } } },
+      ],
+    }).repos[0].decide?.channel,
+    'discord',
   )
   assert.throws(() => resolveConfig({ ...base, engine: 'legacy', decide: DECIDE }), /needs engine "graph"/)
   const per = resolveConfig({
@@ -379,4 +415,175 @@ test('config: decide channels and the allowlist', () => {
   assert.equal(per.decide.channel, null)
   assert.deepEqual(per.repos[0].decide, { channel: 'github', answerers: { github: ['ana'] }, idleHours: 24 })
   assert.equal(resolveConfig(base).phases.decide.cap, 1)
+})
+
+// ---- the Discord channel, over a fake mycelium broker
+
+/**
+ * mycelium's broker as cambium sees it: an outbox that ignores a repeated (service, key), and an inbox of replies
+ * by topic with rising cursors. It outlives a cambium process, as the SQLite file does.
+ */
+function fakeBroker() {
+  /** @type {{ service: string, topic: string, key: string, body: string, traceparent?: string | null }[]} */
+  const puts = []
+  /** @type {typeof puts} */
+  const queued = []
+  /** @type {{ cursor: number, service: string, topic: string, author: string, authorId: string | null, body: string, at: string }[]} */
+  const replies = []
+  return {
+    puts,
+    queued,
+    outbox: {
+      put(/** @type {(typeof puts)[number]} */ m) {
+        puts.push(m)
+        if (queued.some((q) => q.service === m.service && q.key === m.key)) return { queued: false }
+        queued.push(m)
+        return { queued: true }
+      },
+    },
+    inbox: {
+      after(/** @type {string} */ service, /** @type {string} */ topic, cursor = 0, limit = 100) {
+        return replies
+          .filter((r) => r.service === service && r.topic === topic && r.cursor > Number(cursor ?? 0))
+          .slice(0, limit)
+      },
+    },
+    /** A person's reply in the decision's thread. @param {string} author @param {string} body @param {number} now */
+    reply(author, body, now, authorId = null) {
+      replies.push({
+        cursor: replies.length + 1,
+        service: 'cambium',
+        topic: topicOf(SLUG, N),
+        author,
+        authorId,
+        body,
+        at: new Date(now).toISOString(),
+      })
+    },
+  }
+}
+
+const DISCORD = {
+  ...CONFIG,
+  decide: { channel: 'discord', answerers: { discord: ['james', '123456789012345678'] }, idleHours: 24 },
+}
+
+test('hosted decide on discord: a fixture decision runs end to end over the broker, restarted mid-way, posting nothing twice', async () => {
+  const f = fixture(DISCORD)
+  const broker = fakeBroker()
+  let p = processOver(f.h, T0, broker)
+  const kinds = () => broker.queued.map((m) => m.key.split(':')[2])
+
+  for (let i = 0; i < 3; i++) await p.step()
+  assert.equal(f.marker()?.node, 'ask-round')
+  assert.equal(f.marker()?.input.lease?.holder, 'cambium@discord')
+
+  // The round is queued, then the process dies before the marker says so.
+  f.h.gh.crash.decideWrite = new Error('killed')
+  await p.step()
+  assert.deepEqual(kinds(), ['round'])
+  assert.equal(f.marker()?.node, 'ask-round', 'the marker never heard')
+
+  p = processOver(f.h, p.clock.now(), broker)
+  await p.step()
+  await p.step()
+  assert.equal(f.marker()?.node, 'await-answers')
+  assert.ok(broker.puts.length >= 2, 'the re-run step put the round again')
+  assert.deepEqual(kinds(), ['round'], 'and the broker queued nothing new')
+  const round = broker.queued[0]
+  assert.equal(round.service, 'cambium')
+  assert.equal(round.topic, `issue:${SLUG}#${N}`)
+  assert.equal(round.traceparent, TP, "the decision's traceparent")
+  assert.match(round.body, /round 1: Which parts/)
+  assert.doesNotMatch(round.body, /<!--/, 'no hidden tag on Discord')
+
+  // Nothing posted to the issue but the marker.
+  assert.equal(f.posts('round').length, 0)
+
+  // The answer, by user id; a restart while apply-answers runs.
+  broker.reply('James Loosli', 'yes', p.clock.now(), '123456789012345678')
+  p.clock.advance(1000)
+  await p.step()
+  assert.equal(f.marker()?.node, 'apply-answers')
+  assert.deepEqual(f.marker()?.input.cursor, {
+    author: 'James Loosli',
+    at: new Date(p.clock.now() - MIN - 1000).toISOString(),
+    id: '1',
+  })
+  p = processOver(f.h, p.clock.now(), broker)
+  await p.step()
+  await p.step()
+  await p.step()
+  assert.equal(f.marker()?.node, 'confirm')
+  assert.deepEqual(kinds(), ['round', 'draft'])
+  assert.match(broker.queued[1].body, /\*\*Choice:\*\* Parts 2 \+ 3/)
+  assert.equal(broker.queued[1].traceparent, TP)
+
+  broker.reply('james', 'yes, ship it', p.clock.now())
+  p.clock.advance(1000)
+  await p.step()
+  await p.step()
+  const m = f.marker()
+  assert.equal(m?.status, 'done')
+  assert.equal(m?.outcome, 'answered')
+  assert.equal(m?.input.channel, 'discord')
+  const answer = f.h.gh.issue(N).comments.find((c) => parseAnswer(c.body))
+  assert.ok(answer, 'the answer comment is on the GitHub issue')
+  assert.match(answer.body, /Decided\*\* by james \(discord\): Parts 2 \+ 3/)
+  assert.deepEqual(kinds(), ['round', 'draft'], 'each post queued once')
+  assert.equal(new Set(broker.queued.map((q) => q.key)).size, 2)
+})
+
+test('hosted decide on discord: a reply from a user not on the allowlist does not advance the graph and is noted in the marker', async () => {
+  const f = fixture(DISCORD)
+  const broker = fakeBroker()
+  const p = processOver(f.h, T0, broker)
+  for (let i = 0; i < 4; i++) await p.step()
+  assert.equal(f.marker()?.node, 'await-answers')
+
+  broker.reply('mallory', 'yes', p.clock.now(), '999999999999999999')
+  p.clock.advance(1000)
+  await p.step()
+  await p.step()
+  assert.equal(f.marker()?.node, 'await-answers', 'not advanced')
+  assert.equal(f.marker()?.input.reply, null)
+  assert.equal(f.marker()?.input.cursor, null)
+  assert.deepEqual(
+    f.marker()?.input.ignored.map((x) => [x.author, x.id]),
+    [['mallory', '1']],
+    'noted once, however many ticks see it',
+  )
+  assert.ok(p.events.some((e) => /ignored a Discord reply from mallory/.test(e.msg)))
+
+  broker.reply('James', 'yes', p.clock.now())
+  p.clock.advance(1000)
+  await p.step()
+  assert.equal(f.marker()?.node, 'apply-answers')
+  assert.equal(f.marker()?.input.reply?.author, 'James')
+  assert.equal(f.marker()?.input.cursor?.id, '2')
+})
+
+test('discord channel: poll reads on from the cursor; a post is keyed by its kind and the reply it follows', async () => {
+  const broker = fakeBroker()
+  const deps = /** @type {any} */ ({ broker, log: () => {} })
+  const issue = /** @type {any} */ ({ number: N, stateComment: null })
+  const ch = discordChannel(deps, SLUG, issue, { answerers: ['james'], ignored: [] })
+  const s = /** @type {any} */ ({
+    ...startOf({ issue: { repo: SLUG, number: N, question: 'q', options: [] }, lens: 'technical', channel: 'discord' })
+      .input,
+    lease: { holder: 'h', at: '2026-11-16T12:01:00Z', activeAt: '2026-11-16T12:01:00Z', idleMs: 1 },
+  })
+  broker.reply('james', 'first', T0)
+  broker.reply('james', 'second', T0)
+  assert.equal((await ch.poll(s))?.body, 'first')
+  assert.equal((await ch.poll({ ...s, cursor: { author: 'james', at: '', id: '1' } }))?.body, 'second')
+  assert.equal(await ch.poll({ ...s, cursor: { author: 'james', at: '', id: '2' } }), null)
+
+  const round = { round: { n: 1, questions: [{ id: 'a', title: 'A', text: 'A?', rec: 'yes' }] } }
+  await ch.post(round, s)
+  await ch.post(round, s)
+  assert.equal(broker.queued.length, 1, 'the same post after the same reply is queued once')
+  assert.equal(broker.queued[0].traceparent, null)
+  await ch.post(round, { ...s, cursor: { author: 'james', at: '', id: '1' } })
+  assert.equal(broker.queued.length, 2, 'after a new reply it is a new post')
 })
