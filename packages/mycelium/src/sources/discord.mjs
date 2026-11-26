@@ -34,9 +34,12 @@ export function discordConfig(env = process.env) {
     .map((s) => (s.startsWith('forum:') ? { id: s.slice(6), forum: true } : { id: s, forum: false }))
   if (!token || channels.length === 0) return null
   for (const c of channels) if (!/^\d+$/.test(c.id)) throw new Error(`discord: channel '${c.id}' is not a snowflake`)
+  const decisions = String(env.MYCELIUM_DECISIONS_CHANNEL ?? '').trim()
+  if (decisions && channels.some((c) => c.id === decisions))
+    throw new Error(`discord: ${decisions} is the decisions channel (MYCELIUM_DECISIONS_CHANNEL); it is never intake`)
   const guild = env.MYCELIUM_DISCORD_GUILD || null
   if (channels.some((c) => c.forum) && !guild) throw new Error('discord: forum channels need MYCELIUM_DISCORD_GUILD')
-  return { token, channels, guild }
+  return { token, channels, guild, decisions: decisions || null }
 }
 
 export const snowflakeAt = (/** @type {number} */ ms) => String((BigInt(Math.max(0, ms)) - DISCORD_EPOCH) << 22n)

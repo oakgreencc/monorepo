@@ -1,6 +1,6 @@
 # mycelium
 
-Intake connectors. An external event (a Discord post, an App Store review, a TestFlight tester's feedback or crash, a Google Play review, an Android vitals crash or ANR, an in-app Report a Bug) is normalized into an **envelope**, fingerprinted, and either opens one `q:intake` intent issue or, when an open intent already has that fingerprint, becomes a comment on it.
+Intake connectors, and the stack's [Discord broker](#broker). An external event (a Discord post, an App Store review, a TestFlight tester's feedback or crash, a Google Play review, an Android vitals crash or ANR, an in-app Report a Bug) is normalized into an **envelope**, fingerprinted, and either opens one `q:intake` intent issue or, when an open intent already has that fingerprint, becomes a comment on it.
 
 Node ≥ 22; the only dependencies are OpenTelemetry's (see [Tracing](#tracing)). GitHub access goes through [`graft api`](../graft), so `graft` must be on `PATH` and set up for the target repository.
 
@@ -8,8 +8,9 @@ Node ≥ 22; the only dependencies are OpenTelemetry's (see [Tracing](#tracing))
 
 ```sh
 mycelium poll <discord|asc|testflight|play|vitals|device-logs> [--dry-run]   # one pass over one source
-mycelium run [--dry-run]                       # every configured source, each on its own interval, then the notifier
+mycelium run [--dry-run]                       # every configured source, each on its own interval, then the notifier and the broker
 mycelium notify [--dry-run]                    # one notifier pass (see Notify)
+mycelium broker                                # one broker pass (see Broker)
 mycelium install [--dry-run]                   # write the launchd agent for `run`
 ```
 
@@ -114,6 +115,29 @@ One cursor per source in `$MYCELIUM_STATE`, else `~/.oakgreen/mycelium/state.jso
 
 `needs` is what an unconfigured source lacks (`not configured; set …`). `target` is what a configured one reads: `2 channels, 1 forum`, `app <id>`, the Play package, or `<stage> · bug reports[ and crashes] · <api host>`; never a token, key or password. `last` is `{ at, ms, ok, created, commented, skipped }` after a good pass, `{ at, ms, ok: false, error }` after a failed one (`message` instead of the tally for `notify`), `null` before the first. `nextAt` is when the next pass is due, `null` once stopped. A status file that cannot be written never stops intake.
 
+## Broker
+
+mycelium is the stack's one Discord client. Local services queue messages for Discord and read the replies through a store mycelium owns: `$MYCELIUM_BROKER_DB`, else `~/.oakgreen/mycelium/broker.db` (SQLite, WAL, so several processes can write at once).
+
+```js
+import { inbox, outbox } from '@oakgreencc/mycelium'
+
+outbox.put({ service: 'cambium', topic: 'issue:owner/repo#12', key: 'ask-12-1', body: 'A or B?', traceparent })
+// → { queued: true }; the same service and key again is a no-op → { queued: false }
+inbox.after('cambium', 'issue:owner/repo#12', cursor)
+// → [{ cursor, service, topic, messageId, author, authorId, body, at, traceparent }], oldest first; pass the last cursor to read on
+```
+
+`outbox` and `inbox` open the default store on first use (settings resolved like mycelium's own); `openBroker({ path, tracer, log })` opens another.
+
+- **Topics.** The only topic kind is `issue:<owner/repo>#<n>`: one public thread (`owner/repo#n`) in the decisions channel, created on the topic's first post and reused after. Any other topic is refused by `put`.
+- **Drain.** `run` (every `MYCELIUM_BROKER_INTERVAL_S`, default 30) and `mycelium broker` post queued messages oldest first, mentions never parsed, at most 2000 characters. Each is marked sent once Discord answers, and carries a nonce Discord enforces, so neither a restart nor a lost answer posts it twice. A failed post stops the pass there and is retried next pass.
+- **Receive.** Then every topic thread is read past its cursor. A message by a person lands in the inbox once for each service that has posted to the topic. Bot and webhook messages (mycelium's own posts among them) and system notices only move the cursor.
+- **Intake.** The decisions channel is never an intake channel: a `MYCELIUM_DECISIONS_CHANNEL` that is also in `MYCELIUM_DISCORD_CHANNELS` is refused by every command.
+- **Tracing and logs.** `put`, each send and each receive record a span, `mycelium.broker.put`, `.send` and `.receive`, with `mycelium.broker.service`, `.topic` and `.key`. `put` is a child of the caller's `traceparent`; the send is a child of the put; a receive is a child of that service's last put in the topic, and its traceparent is on the inbox row. Each also logs one JSON line to the mycelium log: `{ direction: 'out' | 'in', event: 'put' | 'send' | 'receive', service, topic, key }` (a receive's key is `discord:<message id>`).
+
+The bot needs View Channel, Read Message History, Send Messages, Create Public Threads and Send Messages in Threads on the decisions channel.
+
 ## Configuration
 
 Three places, highest first:
@@ -140,6 +164,9 @@ A credential (marked † below) in `forest.json` is refused, and so is a key myc
 | `MYCELIUM_DISCORD_GUILD`                                     | guild id; required for forum channels, used for message links                                                                         |
 | `MYCELIUM_DISCORD_NOTIFY`                                    | `true` answers Discord reporters ([Notify](#notify)); the token then needs Send Messages                                              |
 | `MYCELIUM_NOTIFY_INTERVAL_S`                                 | notifier interval in `run`, default 60                                                                                                |
+| `MYCELIUM_DECISIONS_CHANNEL` | text channel id whose threads carry the [broker](#broker)'s topics; never also in `MYCELIUM_DISCORD_CHANNELS`; unset: no broker |
+| `MYCELIUM_BROKER_DB` | broker store, default `~/.oakgreen/mycelium/broker.db` |
+| `MYCELIUM_BROKER_INTERVAL_S` | broker drain and receive interval in `run`, default 30 |
 | `MYCELIUM_ASC_KEY_ID`, `MYCELIUM_ASC_ISSUER_ID` †            | App Store Connect API key, shared by `asc` and `testflight` (read access to reviews and beta feedback; no other credential)           |
 | `MYCELIUM_ASC_KEY_P8` †                                      | the `.p8` PEM, or its base64                                                                                                          |
 | `MYCELIUM_ASC_APP_ID`                                        | the app's numeric App Store Connect id                                                                                                |

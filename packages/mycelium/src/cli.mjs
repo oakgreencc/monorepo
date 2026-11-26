@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
+import { brokerConfig, openBroker } from './broker.mjs'
 import { settingsHint, withEnvFile } from './envfile.mjs'
 import { graftClient } from './github.mjs'
 import { createIntake } from './intake.mjs'
@@ -18,7 +19,9 @@ export const HELP = `mycelium — intake connectors: external events become q:in
 
   mycelium poll <source> [--dry-run]   one pass over one source (${SOURCES.join(', ')})
   mycelium run [--dry-run]             every configured source, each on its own interval, then the notifier
+                                       and the broker
   mycelium notify [--dry-run]          one notifier pass: acknowledge new intents, post outcomes of closed ones
+  mycelium broker                      one broker pass: post the outbox to Discord, read thread replies into the inbox
   mycelium install [--dry-run]         write the launchd agent for \`run\` (start it: oakgreen start mycelium)
 
 Flags:
@@ -97,7 +100,8 @@ export async function main(argv, deps = {}) {
   const dryRun = values['dry-run']
   if (verb === 'install') return install(env, dryRun, deps, out)
   const repo = values.repo ?? env.MYCELIUM_REPO
-  if (!repo && !deps.github && !dryRun) throw new Error('no repository: pass --repo <owner/name> or set MYCELIUM_REPO')
+  if (!repo && !deps.github && !dryRun && verb !== 'broker')
+    throw new Error('no repository: pass --repo <owner/name> or set MYCELIUM_REPO')
   const github = deps.github ?? (repo ? graftClient({ repo }) : offline)
   const state = dryRun ? memoryState() : fileState(values.state ?? defaultStatePath(env, deps.home))
   const hours = Number(env.MYCELIUM_BACKFILL_HOURS ?? BACKFILL_HOURS)
@@ -112,6 +116,13 @@ export async function main(argv, deps = {}) {
   }
 
   const channels = channelsFromEnv({ env, fetch, sleep })
+  // Validated for every verb: a decisions channel that is also intake is refused before anything runs.
+  const brokerCfg = brokerConfig(env)
+  const broker =
+    brokerCfg && !dryRun
+      ? openBroker({ env, home: deps.home, tracer: tracing.tracer, log: (r) => err(JSON.stringify(r)) })
+      : null
+  const brokerJob = broker && brokerCfg ? broker.job({ fetch, sleep, config: brokerCfg }) : null
   const interval = Number(env.MYCELIUM_NOTIFY_INTERVAL_S)
   const notifier =
     Object.keys(channels).length && github.issuesSince
@@ -131,6 +142,11 @@ export async function main(argv, deps = {}) {
       if (!notifier)
         throw new Error('notify: no channel is enabled (set MYCELIUM_DISCORD_NOTIFY=true) or no repository')
       err(await notifier.run(now()))
+      return 0
+    }
+    if (verb === 'broker') {
+      if (!brokerJob) throw new Error('broker: no decisions channel (set MYCELIUM_DECISIONS_CHANNEL); no dry run')
+      err(await brokerJob.run(now()))
       return 0
     }
     if (verb === 'poll') {
@@ -153,10 +169,13 @@ export async function main(argv, deps = {}) {
           err(`${message} (skipped)`)
         }
       }
-      if (sources.length === 0) throw new Error('no source is configured')
+      if (sources.length === 0 && !brokerJob) throw new Error('no source is configured')
       const stamp = (/** @type {string} */ l) => err(`${new Date(now()).toISOString()} ${l}`)
       const notifying = notifier ? `notify ${Object.keys(channels).join(', ')}` : 'notify off'
-      stamp(`mycelium up: ${repo ?? '(no repo)'}; sources ${sources.map((s) => s.name).join(', ')}; ${notifying}`)
+      const brokering = brokerJob ? `broker ${broker?.path}` : 'broker off'
+      stamp(
+        `mycelium up: ${repo ?? '(no repo)'}; sources ${sources.map((s) => s.name).join(', ')}; ${notifying}; ${brokering}`,
+      )
       const status = dryRun
         ? null
         : createStatus({
@@ -183,7 +202,7 @@ export async function main(argv, deps = {}) {
           sleep,
           signal,
           report: stamp,
-          jobs: notifier ? [notifier] : [],
+          jobs: [...(notifier ? [notifier] : []), ...(brokerJob ? [brokerJob] : [])],
           observe: (r) => status?.pass(r),
         })
       } finally {
@@ -195,6 +214,7 @@ export async function main(argv, deps = {}) {
   } finally {
     // Spans are batched: flush them before the process exits. Telemetry
     // trouble is reported, never the reason a command fails.
+    broker?.close()
     await tracing.shutdown().catch((e) => err(`tracing: span export failed: ${e?.message || e?.code || e}`))
   }
 }
