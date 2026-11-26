@@ -59,6 +59,12 @@ When the repository has hosted decisions on (`decide.channel: "github"`), cambiu
 
 On `yes`, cambium files the follow-ups and posts the decision; the issue goes back to triage. Only logins listed in `decide.answerers.github` can answer; other replies are ignored. A day without a reply pauses the decision; the next reply resumes it.
 
+## Decide on Discord
+
+When the repository has `decide.channel: "discord"`, the same rounds and draft go to a thread named `<owner>/<repo>#<n>` in mycelium's decisions channel instead. Reply in that thread, in the same way as on GitHub. The decision is still recorded on the issue.
+
+This needs mycelium's broker: `MYCELIUM_DECISIONS_CHANNEL` set to the decisions channel, which must not also be an intake channel. Only people listed in `decide.answerers.discord` (by username or user ID) can answer; other replies are ignored.
+
 ## Reply to send it back
 
 With the graph engine and triage on, comment on the issue. A comment from a person (not a bot, not the App) wakes it: cambium moves it back to `q:intake`, and triage reads your reply with the original question. This works for every `why:*` except `why:approve`.

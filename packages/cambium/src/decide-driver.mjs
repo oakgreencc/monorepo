@@ -17,9 +17,12 @@
  * the decision has left is dropped.
  *
  * Channels: `github` ({@link githubChannel}) posts rounds and drafts as issue comments and reads replies from the
- * issue's comments. Only a login on the channel's allowlist (`decide.answerers.<channel>`) answers; anyone else's
- * comment is ignored and noted in the marker (`input.ignored`).
+ * issue's comments. `discord` ({@link discordChannel}) puts them in mycelium's broker outbox and reads replies from
+ * its inbox: mycelium is the one Discord client, posting to a thread of its decisions channel. Only a sender on the
+ * channel's allowlist (`decide.answerers.<channel>`) answers; anyone else's reply is ignored and noted in the marker
+ * (`input.ignored`). Either way the marker and the answer stay on the GitHub issue: only the conversation moves.
  */
+import { inbox as sharedInbox, outbox as sharedOutbox } from '@oakgreencc/mycelium/broker'
 import { Ask } from './ask.mjs'
 import { capsFor } from './config.mjs'
 import { advance } from './graph/index.mjs'
@@ -48,11 +51,20 @@ import { stopOverdue } from './workers.mjs'
  * @typedef {import('./graphs/decide.mjs').DecideMarker} DecideMarker
  * @typedef {import('./graphs/decide.mjs').DecideReply} DecideReply
  * @typedef {{ author: string, at: string, id: string | null }} Noted
+ * @typedef {{
+ *   outbox: { put(m: { service: string, topic: string, key: string, body: string, traceparent?: string | null }):
+ *     { queued: boolean } },
+ *   inbox: { after(service: string, topic: string, cursor?: number | null, limit?: number):
+ *     { cursor: number, author: string, authorId: string | null, body: string, at: string }[] },
+ * }} Broker
+ *   The client side of mycelium's Discord broker (`@oakgreencc/mycelium/broker`); `deps.broker` fakes it.
  */
 
 export const PHASE = 'decide'
 /** The channels a hosted decision can run on. */
-export const CHANNELS = /** @type {const} */ (['github'])
+export const CHANNELS = /** @type {const} */ (['github', 'discord'])
+/** The service name cambium puts and reads under in mycelium's broker. */
+export const BROKER_SERVICE = 'cambium'
 /** The labels of a decision to work through in a session (as briefs.mjs). */
 const DECIDE_SESSION = ['ask:decide', 'ask:session']
 
@@ -140,9 +152,10 @@ export async function decideTurn(deps, ctx, slug, issue) {
   const at = prev ? positionOf(prev) : startOf(seedOf(slug, issue, channel))
   /** @type {Noted[]} */
   const ignored = []
+  const opts = { answerers: conf.answerers[channel] ?? [], ignored }
   const dctx = {
     agent: workerAgent(deps, ctx, slug, issue),
-    channel: githubChannel(deps, slug, issue, { answerers: conf.answerers[channel] ?? [], ignored }),
+    channel: channel === 'discord' ? discordChannel(deps, slug, issue, opts) : githubChannel(deps, slug, issue, opts),
     commit: githubCommit(deps, slug, issue, ctx.snaps.get(slug)),
     now: () => deps.clock.now(),
     holder: `cambium@${channel}`,
@@ -334,22 +347,30 @@ const question = (q, i) =>
     `Recommended: ${q.rec}`,
   ].join('\n')
 
+/** A post's kind: `round` or `draft`. @param {any} msg */
+const kindOf = (msg) => (msg.round ? 'round' : 'draft')
+
 /**
- * A post's comment body: a round of questions or a draft, how to reply, and the hidden tag.
+ * A post's body: a round of questions or a draft, how to reply, and (on GitHub) the hidden tag. On Discord there is
+ * no tag: the broker's key does that job, and an HTML comment would show.
  * @param {any} msg `{ round }` or `{ draft }` @param {DecideState} s
+ * @param {{ via?: 'github' | 'discord' }} [opts]
  */
-export function renderPost(msg, s) {
-  const kind = msg.round ? 'round' : 'draft'
-  const tag = `<!-- cambium:decide-post ${JSON.stringify({ kind, after: afterOf(s) }).replace(/--/g, '-\\u002d')} -->`
+export function renderPost(msg, s, { via = 'github' } = {}) {
+  const kind = kindOf(msg)
+  const tag =
+    via === 'github'
+      ? ['', `<!-- cambium:decide-post ${JSON.stringify({ kind, after: afterOf(s) }).replace(/--/g, '-\\u002d')} -->`]
+      : []
+  const where = via === 'github' ? 'in one comment' : 'in one message in this thread'
   if (msg.round)
     return [
       `### Decision, round ${msg.round.n}: ${s.issue.question}`,
       '',
       ...msg.round.questions.flatMap((/** @type {any} */ q, /** @type {number} */ i) => [question(q, i), '']),
-      'Reply in one comment, by number (`1 yes`, `2 the second option, because…`); "yes" alone accepts every',
+      `Reply ${where}, by number (\`1 yes\`, \`2 the second option, because…\`); "yes" alone accepts every`,
       'recommendation. `stop` abandons the decision.',
-      '',
-      tag,
+      ...tag,
     ].join('\n')
   const d = msg.draft
   const list = (/** @type {string[]} */ xs) => (xs.length ? xs.map((x) => `- ${x}`) : ['- (none)'])
@@ -370,9 +391,8 @@ export function renderPost(msg, s) {
     '**Follow-up issues**',
     ...list(d.followUps.map((/** @type {any} */ f) => f.title)),
     '',
-    'Reply `yes` to commit it, say what to change to redraft, or `abandon`.',
-    '',
-    tag,
+    `Reply \`yes\` ${where} to commit it, say what to change to redraft, or \`abandon\`.`,
+    ...tag,
   ].join('\n')
 }
 
@@ -432,6 +452,68 @@ export function githubChannel(deps, slug, issue, { answerers, ignored }) {
             issue: issue.number,
           })
         }
+      }
+      return null
+    },
+  }
+}
+
+/** A decision's broker topic: one thread in mycelium's decisions channel. @param {string} slug @param {number} n */
+export const topicOf = (slug, n) => `issue:${slug}#${n}`
+
+/** The broker cursor a decision's state has read up to (a Discord reply's id is its inbox cursor). @param {DecideState} s */
+const brokerCursor = (s) => (s.cursor?.id && /^\d+$/.test(s.cursor.id) ? Number(s.cursor.id) : 0)
+
+/** How far one poll reads the inbox, in pages of 100. */
+const POLL_PAGES = 10
+
+/**
+ * The Discord channel of one issue, over mycelium's broker (`deps.broker`, else the shared store). cambium holds no
+ * Discord token and makes no Discord call: mycelium drains the outbox to a thread of its decisions channel
+ * (`MYCELIUM_DECISIONS_CHANNEL`) and reads replies back into the inbox.
+ *
+ * - `post(msg, s)`: `outbox.put` under service `cambium`, topic `issue:<owner/repo>#<n>`, keyed by the post's kind
+ *   and the reply it follows, with the decision's traceparent. The broker ignores a key it already holds, so a step
+ *   re-run after a lost marker write queues nothing.
+ * - `poll(s)`: the first inbox reply after `s.cursor` from a sender on `answerers` (a Discord username or user id,
+ *   case-insensitive). Anyone else's is skipped and pushed to `ignored` once.
+ *
+ * @param {Deps & { broker?: Broker }} deps @param {string} slug @param {Issue} issue
+ * @param {{ answerers: string[], ignored: Noted[] }} opts
+ */
+export function discordChannel(deps, slug, issue, { answerers, ignored }) {
+  const broker = deps.broker ?? { outbox: sharedOutbox, inbox: sharedInbox }
+  const topic = topicOf(slug, issue.number)
+  const allowed = new Set(answerers.map((a) => a.toLowerCase()))
+  const traceparent = issue.stateComment?.marker?.traceparent ?? null
+  return {
+    /** @param {unknown} msg @param {DecideState} s */
+    async post(msg, s) {
+      const key = `decide:${slug}#${issue.number}:${kindOf(msg)}:${afterOf(s)}`
+      const body = renderPost(msg, s, { via: 'discord' })
+      const { queued } = broker.outbox.put({ service: BROKER_SERVICE, topic, key, body, traceparent })
+      if (queued) deps.log('info', `decide: queued a ${kindOf(msg)} for Discord`, { repo: slug, issue: issue.number })
+    },
+    /** @param {DecideState} s @returns {Promise<DecideReply | null>} */
+    async poll(s) {
+      let cursor = brokerCursor(s)
+      for (let page = 0; page < POLL_PAGES; page++) {
+        const replies = broker.inbox.after(BROKER_SERVICE, topic, cursor, 100)
+        for (const r of replies) {
+          cursor = r.cursor
+          const id = String(r.cursor)
+          if (allowed.has(r.author.toLowerCase()) || (r.authorId && allowed.has(r.authorId)))
+            return { author: r.author, at: r.at, channel: 'discord', body: r.body, id }
+          const note = { author: r.author, at: r.at, id }
+          if (!s.ignored.some((x) => sameNote(x, note)) && !ignored.some((x) => sameNote(x, note))) {
+            ignored.push(note)
+            deps.log('info', `decide: ignored a Discord reply from ${r.author} (not an answerer)`, {
+              repo: slug,
+              issue: issue.number,
+            })
+          }
+        }
+        if (replies.length < 100) break
       }
       return null
     },

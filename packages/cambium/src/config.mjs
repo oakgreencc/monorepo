@@ -35,11 +35,13 @@ import { assertMigrated, forestPath, readForest, sectionOf } from './forest.mjs'
  *   `wallClockMinutes` and `maxTurns` for this repo's workers ({@link capsFor}). `watch`: workflows whose latest
  *   run on a branch must be green (watch.mjs). `decide`: the hosted decide driver for this repo, over the top-level
  *   `decide` (absent: the top-level one).
- * @typedef {{ channel: 'github' | null, answerers: Record<string, string[]>, idleHours: number }} DecideConfig
+ * @typedef {{ channel: 'github' | 'discord' | null, answerers: Record<string, string[]>, idleHours: number }} DecideConfig
  *   The hosted decide driver (decide-driver.mjs, `engine: "graph"`). `channel` (default null: off): where cambium's
  *   tick walks a person through a `q:human` + `ask:decide` + `ask:session` issue; `github` posts the rounds and the
- *   draft as issue comments and reads replies from them. `answerers`: per channel, the logins whose replies count;
- *   anyone else's is ignored and noted in the decision's marker. The channel in use needs at least one.
+ *   draft as issue comments and reads replies from them; `discord` sends them through mycelium's broker to a thread
+ *   of its decisions channel and reads replies from there. `answerers`: per channel, the logins whose replies count
+ *   (for `discord`, Discord usernames or user ids); anyone else's is ignored and noted in the decision's marker. The
+ *   channel in use needs at least one.
  *   `idleHours` (default 24): no reply for this long pauses the decision until the next one.
  * @typedef {Partial<Record<'task' | 'dispatch' | 'rescue' | 'decide', { wallClockMinutes?: number, maxTurns?: number }>>} RepoPhases
  * @typedef {{ workflow: string, branch: string, issue: boolean }} Watch
@@ -346,19 +348,31 @@ const merge2 = (base, over) => ({
   answerers: { ...(base?.answerers ?? {}), ...(over?.answerers ?? {}) },
 })
 
+/** The channels the hosted decide driver runs on (decide-driver.mjs `CHANNELS`). */
+const DECIDE_CHANNELS = ['github', 'discord']
+/** A Discord username (new style, lowercase) or a user id (snowflake). */
+const DISCORD_NAME = /^(\d{17,20}|[a-z0-9_.]{2,32})$/i
+
 /**
  * A checked `decide` block. @param {string} where @param {any} raw @returns {DecideConfig}
  */
 function decideConfig(where, raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`config: ${where} must be an object`)
   const { channel = null, answerers = {}, idleHours = 24 } = raw
-  if (channel !== null && channel !== 'github')
-    throw new Error(`config: ${where}.channel must be "github" or null, got ${JSON.stringify(channel)}`)
+  if (channel !== null && !DECIDE_CHANNELS.includes(channel))
+    throw new Error(
+      `config: ${where}.channel must be ${DECIDE_CHANNELS.map((c) => `"${c}"`).join(', ')} or null, got ${JSON.stringify(channel)}`,
+    )
   if (!answerers || typeof answerers !== 'object' || Array.isArray(answerers))
     throw new Error(`config: ${where}.answerers must be an object of channel → logins`)
   for (const [ch, logins] of Object.entries(answerers))
     if (!Array.isArray(logins) || logins.some((l) => typeof l !== 'string' || !l))
       throw new Error(`config: ${where}.answerers.${ch} must be a list of logins`)
+  for (const name of answerers.discord ?? [])
+    if (!DISCORD_NAME.test(name))
+      throw new Error(
+        `config: ${where}.answerers.discord: ${JSON.stringify(name)} is not a Discord username (2-32 of a-z 0-9 _ .) or user id`,
+      )
   if (channel && !answerers[channel]?.length)
     throw new Error(`config: ${where}.answerers.${channel} needs at least one login: nobody else may answer`)
   if (!(typeof idleHours === 'number' && idleHours > 0))
