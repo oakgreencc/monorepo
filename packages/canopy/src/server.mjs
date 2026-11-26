@@ -8,7 +8,8 @@ import { readHeartbeat as defaultReadHeartbeat } from './heartbeat.mjs'
 import { readIntake as defaultReadIntake, intakeActivity } from './intake.mjs'
 import { PAGE } from './page.mjs'
 import { emptyColumns } from './queues.mjs'
-import { traceDetail, traceIndex, traceList } from './traces.mjs'
+import { SESSION_ID } from './sessions.mjs'
+import { summarize, traceDetail, traceIndex, traceList } from './traces.mjs'
 
 export const DEFAULT_HOST = '127.0.0.1'
 export const DEFAULT_PORT = 4317
@@ -28,6 +29,7 @@ export const COST_DAYS_SHOWN = 7
  *   host?: string,
  *   notes?: string[],
  *   traces?: import('./traces.mjs').TraceStore,
+ *   sessions?: import('./sessions.mjs').SessionLogs,
  *   issues?: { get(slug: string, number: number): Promise<import('./github.mjs').IssueRead> },
  *   briefs?: Briefs,
  * }} AppOptions
@@ -200,6 +202,18 @@ export function createHandler(opts) {
     if (traces && path === '/api/traces') return json(async () => traceList(await traces.read()))
     const one = /^\/api\/traces\/([0-9a-f]{32})$/.exec(path)
     if (traces && one) return json(async () => traceDetail(await traces.read(), one[1]))
+    const ses = /^\/api\/traces\/([0-9a-f]{32})\/sessions\/([0-9a-f-]{36})$/.exec(path)
+    if (traces && opts.sessions && ses && SESSION_ID.test(ses[2])) {
+      const { sessions } = opts
+      // Only a session the trace names: the page is not a general-purpose reader of local files.
+      return json(async () => {
+        const f = await traces.read()
+        const spans = f.traces.get(ses[1])
+        if (!spans?.some((s) => s.name === 'claude.session' && s.attrs['claude.session_id'] === ses[2])) return null
+        const { repo, issue } = summarize(ses[1], spans)
+        return sessions.find({ repo, issue, sessionId: ses[2] })
+      }, 'no such session in this trace')
+    }
     const issue = /^\/api\/issue\/([\w.-]+)\/([\w.-]+)\/([1-9]\d{0,9})$/.exec(path)
     if (opts.issues && issue) {
       const { issues, readHeartbeat = defaultReadHeartbeat } = opts

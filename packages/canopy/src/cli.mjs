@@ -9,11 +9,12 @@ import { cachedIssues, cachedQueues, DEFAULT_TTL_MS, graftClient, MIN_TTL_MS } f
 import { logPath, plist, plistPath } from './launchd.mjs'
 import { createApp, DEFAULT_HOST, DEFAULT_PORT } from './server.mjs'
 import { snapshotQueues } from './snapshot.mjs'
+import { sessionLogs } from './sessions.mjs'
 import { traceStore } from './traces.mjs'
 
 export const HELP = `canopy — a local read-only page over cambium's heartbeat and the GitHub queues
 
-usage: canopy [--port <n>] [--host <addr>] [--state <file>] [--queues <file>] [--traces <file>] [--intake <file>] [--config <file>] [--repo <owner/name>]... [--cache <seconds>]
+usage: canopy [--port <n>] [--host <addr>] [--state <file>] [--queues <file>] [--traces <file>] [--logs <dir>] [--intake <file>] [--config <file>] [--repo <owner/name>]... [--cache <seconds>]
        canopy install [--dry-run] [same flags]   write the launchd agent, serving with those flags
                                                  (start it: oakgreen start canopy; --dry-run prints it)
 
@@ -23,6 +24,8 @@ usage: canopy [--port <n>] [--host <addr>] [--state <file>] [--queues <file>] [-
   --queues <file>    cambium's queue view, read instead of GitHub while fresh (default: paths.queues from the
                      cambium config, else <paths.home>/queues.json)
   --traces <file>    OTLP/JSON spans from cambium's collector (default: <paths.home>/otel/traces.jsonl)
+  --logs <dir>       cambium's worker logs, for session transcripts (default: paths.logs from the cambium config,
+                     else <paths.home>/logs)
   --intake <file>    mycelium's status file (default: $MYCELIUM_STATUS, else ~/.mycelium/status.json)
   --config <file>    cambium config (default: $CAMBIUM_CONFIG, else ~/.cambium/config.json)
   --repo <o/n>       repository to show queues for; repeatable (default: the config's repos, else the heartbeat's)
@@ -73,6 +76,7 @@ export function main(
         state: { type: 'string' },
         queues: { type: 'string' },
         traces: { type: 'string' },
+        logs: { type: 'string' },
         intake: { type: 'string' },
         config: { type: 'string' },
         repo: { type: 'string', multiple: true },
@@ -116,6 +120,7 @@ export function main(
         state: values.state,
         queues: values.queues,
         traces: values.traces,
+        logs: values.logs,
         intake: values.intake,
         config: values.config,
         repos: values.repo,
@@ -152,6 +157,7 @@ export function main(
     host,
     notes,
     traces: traceStore({ path: settings.tracesPath }),
+    sessions: sessionLogs({ logs: settings.logsPath }),
     intakePath: settings.intakePath,
     briefs: settings.briefs,
   })

@@ -12,13 +12,15 @@ export const expandHome = (/** @type {string} */ p, home = homedir()) =>
  * Where the heartbeat lives and which repos to read, from flags first, then
  * cambium's own config file. Only `paths` and `repos[].slug`/`path` are read from it.
  *
- * @param {{ state?: string, config?: string, repos?: string[], traces?: string, intake?: string, queues?: string }} flags
+ * @param {{ state?: string, config?: string, repos?: string[], traces?: string, intake?: string, queues?: string, logs?: string }} flags
  * @param {{ env?: Record<string, string | undefined>, home?: string, read?: (p: string) => string }} [deps]
- * @returns {{ statePath: string, queuesPath: string, tracesPath: string, intakePath: string, repos: string[], configPath: string,
+ * @returns {{ statePath: string, queuesPath: string, tracesPath: string, logsPath: string, intakePath: string, repos: string[],
+ *   configPath: string,
  *   configError: string | null,
  *   briefs: { dir: string, paths: Record<string, string> } }}
  *   `queuesPath`: cambium's queue view (snapshot.mjs): `--queues`, then the config's `paths.queues`, then
  *   `<paths.home>/queues.json`.
+ *   `logsPath`: cambium's worker logs: `--logs`, then the config's `paths.logs`, then `<paths.home>/logs`.
  *   `briefs`: where cambium writes session briefs (`<home>/briefs`) and each repo's checkout (`repos[].path`).
  */
 export function resolveSettings(
@@ -43,6 +45,9 @@ export function resolveSettings(
   const queuesPath = resolve(expandHome(flags.queues ?? queuesFromConfig, home))
   // Where cambium's local collector (otel/otelcol.yaml) writes spans.
   const tracesPath = resolve(expandHome(flags.traces ?? join(homeDir, 'otel', 'traces.jsonl'), home))
+  // Where cambium keeps each worker's stdout (stream-json) and prompt.
+  const logsFromConfig = typeof cfg?.paths?.logs === 'string' ? cfg.paths.logs : join(homeDir, 'logs')
+  const logsPath = resolve(expandHome(flags.logs ?? logsFromConfig, home))
   // mycelium's status file (mycelium's README, Status file).
   const intakePath = resolve(expandHome(flags.intake ?? env.MYCELIUM_STATUS ?? '~/.mycelium/status.json', home))
 
@@ -59,6 +64,7 @@ export function resolveSettings(
     statePath,
     queuesPath,
     tracesPath,
+    logsPath,
     intakePath,
     repos: [...new Set(/** @type {string[]} */ (listed))],
     configPath,
