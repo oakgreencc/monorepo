@@ -28,7 +28,7 @@ import { isRepair } from './base-health.mjs'
 import { stopOverdue } from './workers.mjs'
 import { syncBriefs } from './briefs.mjs'
 import { queueView } from './queue-view.mjs'
-import { snapshotsFile } from './snapshot-file.mjs'
+import { fromJson, snapshotsFile, toJson } from './snapshot-file.mjs'
 import { costDays, costOf, dayOf, overBudget, recordCost } from './cost.mjs'
 
 /**
@@ -216,21 +216,65 @@ export async function eachWorker(deps, ctx, workers, fn) {
 /**
  * @typedef {'first' | 'config' | 'due' | 'pending' | 'changed' | 'probe-failed' | 'always'} FullReadWhy
  *   Why a repo was read in full: no snapshot yet; its config changed; `fullReadEvery` reached; an open PR's
- *   checks, merge queue or `mergeable` are still settling (none bumps `updatedAt`); the probe differs; the probe
- *   failed; no probe at all (`fullReadEvery` 1, or a GitHub without one).
+ *   checks, merge queue or `mergeable` are still settling (none bumps `updatedAt`); a probe request answered 200;
+ *   a probe request failed; no probe at all (`fullReadEvery` 1, or a GitHub without one).
  * @typedef {{ kind: 'probe', why: null } | { kind: 'full', why: FullReadWhy }} ReadKind
- * @typedef {{ snap: Snapshot, probe: import('./github.mjs').Probe, key: string, reused: number }} CachedRead
+ * @typedef {{ snap: Snapshot, etags: Record<string, string | null>, key: string, reused: number }} CachedRead
  *   `reused`: ticks the snapshot has been reused since it was read. `key`: the config it was read under.
+ *   `etags`: the probe's, from just before that read, by request (github.mjs `probeRequests`).
  */
 
-/** The last full read per repo, per daemon (its `deps`): tick to tick, never persisted. @type {WeakMap<Deps, Map<string, CachedRead>>} */
+/**
+ * The last full read per repo, per daemon (its `deps`), tick to tick. Also kept in the store
+ * ({@link CACHE_KEYS}), so a restarted daemon probes first instead of reading in full.
+ * @type {WeakMap<Deps, Map<string, CachedRead>>}
+ */
 const READS = new WeakMap()
+
+/** The store keys of a repo's cached read: the snapshot (written on a full read) and the probe state (every tick). */
+export const CACHE_KEYS = {
+  snap: (/** @type {string} */ slug) => `read.snapshot:${slug}`,
+  probe: (/** @type {string} */ slug) => `read.probe:${slug}`,
+}
 
 /** @param {Deps} deps */
 const readsOf = (deps) => {
   const m = READS.get(deps) ?? new Map()
   READS.set(deps, m)
   return m
+}
+
+/** The cached read: in memory, else from the store (after a restart), else none. @param {Deps} deps @param {string} slug */
+function cachedRead(deps, slug) {
+  const m = readsOf(deps)
+  const hit = m.get(slug)
+  if (hit) return hit
+  try {
+    const p = deps.store.get(CACHE_KEYS.probe(slug))
+    const snap = deps.store.get(CACHE_KEYS.snap(slug))
+    if (!p || !snap) return undefined
+    const { etags, key, reused } = JSON.parse(p)
+    if (!etags || typeof key !== 'string' || !Number.isInteger(reused)) return undefined
+    const read = { snap: fromJson(JSON.parse(snap)), etags, key, reused }
+    m.set(slug, read)
+    return read
+  } catch {
+    return undefined
+  }
+}
+
+/** @param {Deps} deps @param {string} slug @param {CachedRead | null} read @param {{ snap?: boolean }} [opts] */
+function keepRead(deps, slug, read, { snap = true } = {}) {
+  const m = readsOf(deps)
+  if (!read) {
+    m.delete(slug)
+    deps.store.set(CACHE_KEYS.probe(slug), '')
+    deps.store.set(CACHE_KEYS.snap(slug), '')
+    return
+  }
+  m.set(slug, read)
+  if (snap) deps.store.set(CACHE_KEYS.snap(slug), JSON.stringify(toJson(read.snap)))
+  deps.store.set(CACHE_KEYS.probe(slug), JSON.stringify({ etags: read.etags, key: read.key, reused: read.reused }))
 }
 
 /** What the snapshot read depends on in the config: a change reads afresh. @param {Deps} deps @param {string} slug */
@@ -262,49 +306,43 @@ export function fullReadDue(cached, key, every) {
   return null
 }
 
-/** @param {import('./github.mjs').Probe} a @param {import('./github.mjs').Probe} b */
-const sameProbe = (a, b) =>
-  a.issuesAt === b.issuesAt && a.prsAt === b.prsAt && JSON.stringify(a.heads) === JSON.stringify(b.heads)
-
 /**
  * One repo's snapshot. With a probe (`github.probe`, `fullReadEvery` > 1): probe first, then reuse the last full
- * read when nothing it reads has changed ({@link fullReadDue}). The probe runs before a full read too, so the
- * snapshot is never older than the probe it is compared by: a change between the two only costs a read.
+ * read when every probe request answered 304 ({@link fullReadDue}). The probe runs before a full read too, and its
+ * ETags are kept with it, so the snapshot is never older than the tags it is compared by: a change between the
+ * two only costs a read.
  * @param {Deps} deps @param {Ctx} ctx @param {string} slug @returns {Promise<Snapshot>}
  */
 export async function readRepo(deps, ctx, slug) {
   const every = deps.config.fullReadEvery ?? 1
-  const cache = readsOf(deps)
-  const full = async (/** @type {FullReadWhy} */ why, /** @type {import('./github.mjs').Probe | null} */ probe) => {
-    cache.delete(slug)
+  const full = async (/** @type {FullReadWhy} */ why, /** @type {Record<string, string | null> | null} */ etags) => {
+    keepRead(deps, slug, null)
     const snap = await deps.github.read(slug)
-    if (probe) cache.set(slug, { snap: structuredClone(snap), probe, key: readKey(deps, slug), reused: 0 })
+    if (etags) keepRead(deps, slug, { snap: structuredClone(snap), etags, key: readKey(deps, slug), reused: 0 })
     ctx.reads.set(slug, { kind: 'full', why })
     return snap
   }
   if (!deps.github.probe || every <= 1) return full('always', null)
-  const cached = cache.get(slug)
+  const cached = cachedRead(deps, slug)
   const key = readKey(deps, slug)
   /** @type {import('./github.mjs').Probe} */
   let probe
   try {
-    probe = await deps.github.probe(slug)
+    probe = await deps.github.probe(slug, cached?.etags ?? {})
   } catch (err) {
     deps.log('warn', `probe: ${/** @type {Error} */ (err)?.message ?? err}; reading in full`, { repo: slug })
     return full('probe-failed', null)
   }
+  if (probe.errors.length) deps.log('warn', `probe: ${probe.errors.join('; ')}; reading in full`, { repo: slug })
   const due = fullReadDue(cached, key, every)
-  if (due) return full(due, probe)
+  if (due) return full(due, probe.etags)
+  if (probe.changed) return full(probe.errors.length ? 'probe-failed' : 'changed', probe.etags)
   const was = /** @type {CachedRead} */ (cached)
-  if (!sameProbe(was.probe, probe)) return full('changed', probe)
   was.reused++
+  keepRead(deps, slug, was, { snap: false })
   ctx.reads.set(slug, { kind: 'probe', why: null })
-  // The budget now, at the full read's cost: the pause below still allows for the next full read.
-  const rl = probe.rateLimit
-  const rateLimit = rl
-    ? { ...rl, cost: Math.max(rl.cost, was.snap.rateLimit?.cost ?? 0) }
-    : (was.snap.rateLimit ?? null)
-  const snap = { ...structuredClone(was.snap), rateLimit }
+  // The budget as of the last full read (a 304 reports none), at its cost: the pause below allows for the next one.
+  const snap = structuredClone(was.snap)
   // Not read this tick: a release part reused waits for the next read, as a kept one does (github.mjs).
   if (snap.release) snap.release.fresh = false
   return snap

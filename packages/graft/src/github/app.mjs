@@ -80,7 +80,7 @@ export function appJwt({ appId, keyPem, now = Math.floor(Date.now() / 1000) }) {
 }
 
 /** The response headers a refusal keeps — the ones the rate-limit rules read. */
-const KEPT_HEADERS = ['retry-after', 'x-ratelimit-remaining', 'x-ratelimit-reset']
+const KEPT_HEADERS = ['etag', 'retry-after', 'x-ratelimit-remaining', 'x-ratelimit-reset']
 
 const urlFor = (path) => (path.startsWith('http') ? path : `https://api.github.com${path}`)
 
@@ -141,6 +141,9 @@ export function errorBody(text) {
  *
  * With a `cache` (http-cache.mjs), a GET is conditional: a 304 is answered
  * from the cached body, which GitHub does not count against the rate limit.
+ * A caller that sends its own `If-None-Match` keeps the tag it chose: the cache
+ * is skipped, and a 304 is returned as itself (`status: 304`, an empty body),
+ * not thrown, since it is the answer the caller asked about.
  *
  * @param {string} path @param {RequestInit} [opts] @param {typeof globalThis.fetch} [fetchImpl]
  * @param {import('./http-cache.mjs').HttpCache | null} [cache]
@@ -155,7 +158,8 @@ export async function request(path, opts = {}, fetchImpl = globalThis.fetch, cac
     .../** @type {Record<string, string>} */ (opts.headers ?? {}),
   }
   const method = (opts.method ?? 'GET').toUpperCase()
-  const key = cache && method === 'GET' ? `${sent.Accept} ${url}` : null
+  const conditional = Object.keys(sent).some((h) => h.toLowerCase() === 'if-none-match')
+  const key = cache && method === 'GET' && !conditional ? `${sent.Accept} ${url}` : null
   const hit = key ? /** @type {import('./http-cache.mjs').HttpCache} */ (cache).get(key) : null
   const res = await fetchImpl(url, { ...opts, headers: hit ? { ...sent, 'If-None-Match': hit.etag } : sent })
   /** @type {Record<string, string>} */
@@ -170,6 +174,7 @@ export async function request(path, opts = {}, fetchImpl = globalThis.fetch, cac
     return { status: 200, text: hit.text, json: parseJson(hit.text), next: hit.next, headers, cached: true }
   }
   const text = await res.text()
+  if (res.status === 304 && conditional) return { status: 304, text: '', json: null, next: null, headers }
   if (!res.ok) {
     throw Object.assign(new Error(`${path}: ${res.status} ${errorBody(text)}`), {
       status: res.status,

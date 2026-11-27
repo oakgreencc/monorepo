@@ -26,25 +26,66 @@ async function clientForPath(argv, path = '') {
 }
 
 const API_USAGE =
-  'usage: graft api <METHOD> <path> [--body <json>|--body-file <f>] [--paginate] [--raw] [--out <file>] [--repo <owner/repo>]\n\n' +
+  'usage: graft api <METHOD> <path> [--body <json>|--body-file <f>] [--header <k:v>]… [--include]\n' +
+  '                 [--paginate] [--raw] [--out <file>] [--repo <owner/repo>]\n\n' +
   '  graft api GET /repos/o/r/pulls/12\n' +
   "  graft api GET '/repos/o/r/issues?state=open' --paginate\n" +
   '  graft api POST /repos/o/r/issues/12/comments --body \'{"body":"…"}\'\n\n' +
   'JSON is pretty-printed on stdout; a text body (job logs) is printed as-is. Use --paginate on any\n' +
   'list — a first page of 30 otherwise reads as the whole set. --raw, --paginate and --out are\n' +
-  'separate output modes: pick one.'
+  'separate output modes: pick one.\n\n' +
+  "--header 'k: v' sends a request header (repeatable). --include prints the status line\n" +
+  "('HTTP 200') and the ETag and rate-limit headers, a blank line, then the body. With your own\n" +
+  "--header 'If-None-Match: <etag>', a 304 Not Modified is an answer, not an error: exit 0,\n" +
+  "'HTTP 304' under --include and an empty body. GitHub does not count an authorized 304\n" +
+  'against the rate limit.'
+
+/**
+ * The `--header k:v` values as a header object. A malformed one, or one that would replace the token, is refused.
+ * @param {string[]} argv @returns {Record<string, string>}
+ */
+export function headersFrom(argv) {
+  /** @type {Record<string, string>} */
+  const out = {}
+  argv.forEach((a, i) => {
+    if (a !== '--header') return
+    const v = argv[i + 1] ?? ''
+    const at = v.indexOf(':')
+    const name = at > 0 ? v.slice(0, at).trim() : ''
+    if (!name || /\s/.test(name))
+      throw new PublishError(`--header wants 'name: value', got ${JSON.stringify(v)}.\n\n${API_USAGE}`)
+    if (name.toLowerCase() === 'authorization')
+      throw new PublishError('--header cannot set Authorization: graft sends the App token itself.')
+    out[name] = v.slice(at + 1).trim()
+  })
+  return out
+}
+
+/**
+ * The `--include` head: the status line, then each kept header (`etag`, the rate-limit ones) GitHub sent, then a
+ * blank line. The body follows it.
+ * @param {{ status: number, headers?: Record<string, string> }} res @returns {string}
+ */
+export const includeHead = (res) =>
+  [`HTTP ${res.status}`, ...Object.entries(res.headers ?? {}).map(([k, v]) => `${k}: ${v}`), '', ''].join('\n')
 
 /** The output modes; each replaces the others, so asking for two is a mistake. */
 const OUTPUT_MODES = ['--raw', '--paginate', '--out']
 
 export async function runApi(argv) {
-  const [method, path] = positionals(argv, [...COMMON_VALUE_FLAGS, '--body', '--body-file', '--out'])
+  const [method, path] = positionals(argv, [...COMMON_VALUE_FLAGS, '--body', '--body-file', '--out', '--header'])
   if (!method || !path || has(argv, '--help')) {
     console.log(API_USAGE)
     return method && path ? 0 : 1
   }
   const modes = OUTPUT_MODES.filter((f) => has(argv, f))
   if (modes.length > 1) throw new PublishError(`${modes.join(' and ')} cannot be combined — pick one.\n\n${API_USAGE}`)
+  const include = has(argv, '--include')
+  if (include && (has(argv, '--paginate') || has(argv, '--out')))
+    throw new PublishError(
+      `--include shows one answer: it cannot be combined with --paginate or --out.\n\n${API_USAGE}`,
+    )
+  const extra = headersFrom(argv)
   // A merge goes through `graft pr merge`, where the policy is — refused here,
   // before any client, so a runner without the hook is held to it too.
   const merge = restMergeTarget({ method, path })
@@ -54,7 +95,7 @@ export async function runApi(argv) {
   const body = bodyFile ? readFileSync(resolve(bodyFile), 'utf8') : flag(argv, '--body')
   const init = {
     method: method.toUpperCase(),
-    headers: { ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...extra },
     ...(body ? { body } : {}),
   }
 
@@ -69,15 +110,19 @@ export async function runApi(argv) {
 
   // --raw: exactly as GitHub sent it, for callers that parse it themselves.
   if (has(argv, '--raw')) {
-    console.log((await client.raw(path, init)).text)
+    const res = await client.raw(path, init)
+    console.log(`${include ? includeHead(res) : ''}${res.text}`)
     return 0
   }
 
   if (!has(argv, '--paginate')) {
     // A body that is not JSON (`/actions/jobs/<id>/logs`) is printed as the
     // text it is; printing `null` read as "the endpoint returned nothing".
-    const { text, json } = await client.raw(path, init)
-    console.log(json === null && text ? text : JSON.stringify(json, null, 2))
+    // A 304 (to the caller's own If-None-Match) has no body: nothing is printed.
+    const res = await client.raw(path, init)
+    const { text, json } = res
+    const shown = res.status === 304 ? '' : json === null && text ? text : JSON.stringify(json, null, 2)
+    console.log(`${include ? includeHead(res) : ''}${shown}`)
     return 0
   }
 
