@@ -92,17 +92,15 @@ import { parseDecideMarker } from './graphs/decide.mjs'
  * }} Range
  *   `files`: how many files differ between the merge base and `head`. `commits`: oldest first, at most 250.
  *   `base`: the base branch's health, when the repo has a `requiredCheck`.
- * @typedef {{
- *   issuesAt: string | null, prsAt: string | null, heads: Record<string, string | null>,
- *   rateLimit: { cost: number, remaining: number, resetAt: string } | null,
- * }} Probe
- *   The cheap read before the snapshot ({@link PROBE_QUERY}): the newest `updatedAt` of any issue and of any PR
- *   in the repo, and the head oid of each branch the snapshot compares (`baseBranch`, and the release's `from`
- *   and `to`). Equal probes: nothing the snapshot reads has changed, except check results and `mergeable`, which
- *   bump no `updatedAt` (tick.mjs `fullReadDue`).
+ * @typedef {{ changed: boolean, etags: Record<string, string | null>, errors: string[] }} Probe
+ *   The cheap read before the snapshot ({@link probeRequests}): conditional REST GETs, each sent with the
+ *   `If-None-Match` of its last answer. `changed`: any answer other than 304 (a 200, or an error, listed in
+ *   `errors`). `etags`: each request's tag now (a 304 keeps the one sent; an error has none, so its request goes
+ *   unconditional next time). Unchanged: nothing the snapshot reads has changed, except check results and
+ *   `mergeable`, which bump no `updatedAt` (tick.mjs `fullReadDue`). An authorized 304 costs no rate limit.
  * @typedef {{
  *   read(slug: string, opts?: { fresh?: boolean }): Promise<Snapshot>,
- *   probe?(slug: string): Promise<Probe>,
+ *   probe?(slug: string, etags: Record<string, string | null>): Promise<Probe>,
  *   label(slug: string, number: number, change: { add: string[], remove: string[] }): Promise<void>,
  *   writeState(slug: string, number: number, commentId: number | null, body: string): Promise<number>,
  *   close(slug: string, number: number, body: string, opts?: { reason?: 'completed' | 'not_planned' | 'duplicate' }): Promise<void>,
@@ -127,7 +125,7 @@ import { parseDecideMarker } from './graphs/decide.mjs'
  *   mergeRules(slug: string, base: string): Promise<MergeRules>,
  *   mergeCommit(slug: string, number: number): Promise<string | null>,
  * }} GitHub
- *   `probe`: optional; without it every tick reads the full snapshot.
+ *   `probe`: optional; without it every tick reads the full snapshot. `etags`: the last probe's, by request.
  *   `mergeRules`: what `base` requires before a merge ({@link MergeRules}); read only for a PR already stalled.
  *   `workflowRuns`: the newest completed push or schedule runs of `workflow` (file name or id) on `branch`, newest
  *   first (watch.mjs). `mergeCommit`: the commit a merged PR made on its base (null: not merged), for a workflow
@@ -242,35 +240,35 @@ export const issuesQuery = (numbers) =>
 ${SNAPSHOT_QUERY.slice(SNAPSHOT_QUERY.indexOf('fragment I on Issue'), SNAPSHOT_QUERY.indexOf('fragment P on'))}`
 
 /**
- * About one point: whether anything {@link SNAPSHOT_QUERY} reads may have changed. Every issue and PR, whatever
- * its state or labels, so one that left the queue (closed, merged, unlabelled) or a new one (for adoption) counts.
+ * The probe's requests, by name: whether anything {@link SNAPSHOT_QUERY} reads may have changed. The newest-updated
+ * issue or PR (the issues list holds both), whatever its state or labels, so one that left the queue (closed,
+ * merged, unlabelled) or a new one (for adoption) counts; and the head of each branch the snapshot compares
+ * (`base`, and the release's `from` and `to`).
+ * @param {string} slug @param {{ base: string, from?: string, to?: string }} branches
+ * @returns {Record<string, string>}
  */
-export const PROBE_QUERY = `query($owner: String!, $name: String!, $base: String!, $release: Boolean!, $from: String!, $to: String!) {
-  rateLimit { cost remaining resetAt }
-  repository(owner: $owner, name: $name) {
-    issues(first: 1, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { updatedAt } }
-    pullRequests(first: 1, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { updatedAt } }
-    base: ref(qualifiedName: $base) { target { oid } }
-    from: ref(qualifiedName: $from) @include(if: $release) { target { oid } }
-    to: ref(qualifiedName: $to) @include(if: $release) { target { oid } }
-  }
-}`
-
-/** GraphQL `data` for {@link PROBE_QUERY} → {@link Probe}. @param {any} data @returns {Probe} */
-export function normalizeProbe(data) {
-  const d = data?.data ?? data
-  const repo = d?.repository
-  if (!repo) throw new Error('probe: no repository in the answer')
-  /** @type {Record<string, string | null>} */
-  const heads = { base: repo.base?.target?.oid ?? null }
-  if ('from' in repo) heads.from = repo.from?.target?.oid ?? null
-  if ('to' in repo) heads.to = repo.to?.target?.oid ?? null
+export function probeRequests(slug, branches) {
+  const ref = (/** @type {string} */ b) =>
+    `/repos/${slug}/git/ref/heads/${b.split('/').map(encodeURIComponent).join('/')}`
   return {
-    issuesAt: repo.issues?.nodes?.[0]?.updatedAt ?? null,
-    prsAt: repo.pullRequests?.nodes?.[0]?.updatedAt ?? null,
-    heads,
-    rateLimit: d?.rateLimit ?? null,
+    issues: `/repos/${slug}/issues?state=all&sort=updated&direction=desc&per_page=1`,
+    base: ref(branches.base),
+    ...(branches.from ? { from: ref(branches.from) } : {}),
+    ...(branches.to ? { to: ref(branches.to) } : {}),
   }
+}
+
+/**
+ * `graft api --include` output → the status and the `ETag`.
+ * @param {string} text @returns {{ status: number, etag: string | null }}
+ */
+export function parseIncluded(text) {
+  const [head] = String(text).split(/\r?\n\r?\n/, 1)
+  const [line, ...headers] = head.split(/\r?\n/)
+  const status = Number(/^HTTP\S*\s+(\d{3})/.exec(line)?.[1])
+  if (!status) throw new Error(`probe: no status line in ${JSON.stringify(line?.slice(0, 80))}`)
+  const etag = headers.find((h) => /^etag\s*:/i.test(h))
+  return { status, etag: etag ? etag.slice(etag.indexOf(':') + 1).trim() : null }
 }
 
 /** The queued issues after `$after`: the snapshot's first page holds 100, a busy repo has more. */
@@ -722,20 +720,35 @@ export function graftGitHub({ config, exec: run = exec, now = Date.now }) {
       })
       return addIssues(snap, more, unread, config.graft.botLogin)
     },
-    async probe(slug) {
-      const [owner, name] = slug.split('/')
+    async probe(slug, etags) {
       const repo = config.repos.find((x) => x.slug === slug)
       const r = repo?.release
       const release = r && r.from !== r.to ? r : null
-      const vars = JSON.stringify({
-        owner,
-        name,
-        base: `refs/heads/${repo?.baseBranch ?? 'main'}`,
-        release: Boolean(release),
-        from: release ? `refs/heads/${release.from}` : '',
-        to: release ? `refs/heads/${release.to}` : '',
+      const requests = probeRequests(slug, {
+        base: repo?.baseBranch ?? 'main',
+        ...(release ? { from: release.from, to: release.to } : {}),
       })
-      return normalizeProbe(await json(graft(slug, ['graphql', PROBE_QUERY, '--vars', vars])))
+      /** @type {Probe} */
+      const out = { changed: false, etags: {}, errors: [] }
+      await Promise.all(
+        Object.entries(requests).map(async ([name, path]) => {
+          const was = etags[name] ?? null
+          const ask = ['api', 'GET', path, '--include', ...(was ? ['--header', `If-None-Match: ${was}`] : [])]
+          try {
+            const { status, etag } = parseIncluded(await graft(slug, ask))
+            if (status === 304 && was) out.etags[name] = was
+            else {
+              out.changed = true
+              out.etags[name] = status === 200 ? etag : null
+            }
+          } catch (err) {
+            out.changed = true
+            out.etags[name] = null
+            out.errors.push(`${name}: ${/** @type {Error} */ (err)?.message ?? err}`)
+          }
+        }),
+      )
+      return out
     },
     async label(slug, number, { add, remove }) {
       if (!add.length && !remove.length) return

@@ -123,3 +123,23 @@ test('graphql: a RATE_LIMIT error says when the budget resets', async () => {
     return true
   })
 })
+
+test("a caller's own If-None-Match skips the cache; its 304 is returned with the ETag, not thrown", async () => {
+  const state = { version: 1 }
+  const gh = taggingGitHub(state)
+  const client = createClient({ token: 't', fetch: gh.fetch, cache: etagCache(dir()) })
+  await client.api('/repos/o/r')
+  const same = await client.raw('/repos/o/r', { headers: { 'If-None-Match': '"v1"' } })
+  assert.equal(same.status, 304)
+  assert.equal(same.text, '')
+  assert.equal(same.cached, undefined)
+  assert.equal(same.headers?.etag, '"v1"')
+  const stale = await client.raw('/repos/o/r', { headers: { 'if-none-match': '"v0"' } })
+  assert.equal(stale.status, 200)
+  assert.deepEqual(stale.json, { version: 1 })
+  assert.equal(stale.headers?.etag, '"v1"')
+  state.version = 2
+  const moved = await client.raw('/repos/o/r', { headers: { 'If-None-Match': '"v1"' } })
+  assert.equal(moved.status, 200)
+  assert.equal(moved.headers?.etag, '"v2"')
+})

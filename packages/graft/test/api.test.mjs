@@ -1,7 +1,7 @@
 // @ts-check
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { runApi, runGraphql } from '../src/cli/api.mjs'
+import { headersFrom, includeHead, runApi, runGraphql } from '../src/cli/api.mjs'
 import { PublishError } from '../src/errors.mjs'
 import { graphqlMergeField, mutationRootFields, restMergeTarget } from '../src/raw-merge.mjs'
 
@@ -108,5 +108,30 @@ for (const flags of [
     const msg = await refusal(() => runApi(['GET', '/repos/o/r/issues', ...flags]))
     assert.match(msg, /cannot be combined/)
     assert.match(msg, /^usage: graft api/m)
+  })
+}
+
+test('graft api --header: repeatable name:value pairs; a malformed one or Authorization is refused', async () => {
+  assert.deepEqual(headersFrom(['GET', '/x', '--header', 'If-None-Match: "abc"', '--header', 'Accept:text/plain']), {
+    'If-None-Match': '"abc"',
+    Accept: 'text/plain',
+  })
+  assert.deepEqual(headersFrom(['GET', '/x']), {})
+  assert.match(await refusal(async () => headersFrom(['--header', 'novalue'])), /name: value/)
+  assert.match(await refusal(async () => headersFrom(['--header', 'Authorization: token x'])), /App token/)
+})
+
+test('graft api --include: the status line and the kept headers, then a blank line', () => {
+  assert.equal(
+    includeHead({ status: 304, headers: { etag: 'W/"a"', 'x-ratelimit-remaining': '10' } }),
+    'HTTP 304\netag: W/"a"\nx-ratelimit-remaining: 10\n\n',
+  )
+  assert.equal(includeHead({ status: 200 }), 'HTTP 200\n\n')
+})
+
+for (const other of ['--paginate', '--out']) {
+  test(`graft api refuses --include with ${other}`, async () => {
+    const argv = ['GET', '/repos/o/r/issues', '--include', other, ...(other === '--out' ? ['f'] : [])]
+    assert.match(await refusal(() => runApi(argv)), /--include shows one answer/)
   })
 }

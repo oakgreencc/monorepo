@@ -40,6 +40,7 @@ graft issue close 42 --body-file c.md [--reason not_planned]
 graft issue edit 42 --body-file b.md --etag <etag>
 graft issue assign 42 --login alice
 graft issue label 42 --add bug --remove triage
+graft api GET /repos/o/r/git/ref/heads/main --include --header 'If-None-Match: <etag>'
 ```
 
 `graft help` lists every verb.
@@ -89,7 +90,7 @@ graft protects that key, not the whole file: an edit, publish or merge that chan
 
 Defaults and the reasoning behind each: [src/config.mjs](src/config.mjs). Machine identity (which App acts for which owner) is the `graft` section of `~/.oakgreen/forest.json` (`$OAKGREEN_FOREST_CONFIG_PATH` names another file), never the repo; App keys live in `$GRAFT_HOME/apps/<slug>/` (default `~/.oakgreen/graft`), mode 0600. A machine still holding `~/.config/graft` with no `graft` section is refused, naming `oakgreen config migrate`.
 
-REST reads go through an ETag cache in `~/.oakgreen/graft/cache/http/` ([src/github/http-cache.mjs](src/github/http-cache.mjs)): a repeated GET sends `If-None-Match`, and a 304 is served from the cache without spending rate limit. `GRAFT_HTTP_CACHE=0` turns it off. A GraphQL answer that is a `RATE_LIMIT` error is thrown as `graphql: rate limited until <reset>: …`, so a poller can wait out the reset.
+REST reads go through an ETag cache in `~/.oakgreen/graft/cache/http/` ([src/github/http-cache.mjs](src/github/http-cache.mjs)): a repeated GET sends `If-None-Match`, and a 304 is served from the cache without spending rate limit. `GRAFT_HTTP_CACHE=0` turns it off. `graft api --header 'k: v'` (repeatable) sends a request header; `Authorization` is refused, since graft sends the token. `--include` prints the status line (`HTTP 200`), the `etag` and rate-limit headers, a blank line, then the body; not with `--paginate` or `--out`. A caller that sends its own `If-None-Match` bypasses the cache and gets GitHub's answer as is: a 304 exits 0 with `HTTP 304` under `--include` and an empty body, so a poller can tell "unchanged" from "changed" for free (cambium's probe). A GraphQL answer that is a `RATE_LIMIT` error is thrown as `graphql: rate limited until <reset>: …`, so a poller can wait out the reset.
 
 ## Tests
 

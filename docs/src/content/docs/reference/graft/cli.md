@@ -103,7 +103,7 @@ Bodies come only from files. `--body-file -` reads stdin. An inline `--body` is 
 
 | Verb | Usage | Behaviour |
 | --- | --- | --- |
-| `graft api` | `graft api <METHOD> <path> [--body <json> \| --body-file <f>] [--paginate] [--raw] [--out <f>]` | Any REST call as the App. JSON pretty-printed; text bodies printed as-is. `--raw`, `--paginate` and `--out` are mutually exclusive output modes. |
+| `graft api` | `graft api <METHOD> <path> [--body <json> \| --body-file <f>] [--header <k:v>]… [--include] [--paginate] [--raw] [--out <f>]` | Any REST call as the App. JSON pretty-printed; text bodies printed as-is. `--raw`, `--paginate` and `--out` are mutually exclusive output modes. `--header` sends a request header (repeatable; not `Authorization`). `--include` prints `HTTP <status>`, the `etag` and rate-limit headers and a blank line before the body; not with `--paginate` or `--out`. With your own `If-None-Match`, a 304 exits 0 with an empty body. |
 | `graft graphql` | `graft graphql '<query>' [--vars <json> \| --vars-file <f>]` | A GraphQL query as the App. |
 | `graft jobs` | `graft jobs <run-id \| run URL> [--logs <dir>] [--all]` | A workflow run's jobs; `--logs` saves job logs. |
 | `graft ci wait` | `graft ci wait <sha\|ref> [--check <name>] [--timeout <s>] [--interval <s>]` | One check's verdict. Default check: `requiredCheck`. |
