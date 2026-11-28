@@ -83,7 +83,7 @@ test('status --json exits 1 with no heartbeat or a stale one, 0 when fresh', asy
 test('status creates neither the db nor the state dir when absent', async () => {
   const s = setup()
   const home = join(s.home, 'absent')
-  writeFileSync(s.cfg, JSON.stringify({ repos: [{ slug: SLUG, path: '/repo' }], paths: { home } }))
+  writeFileSync(s.cfg, JSON.stringify({ cambium: { repos: [{ slug: SLUG, path: '/repo' }], paths: { home } } }))
   assert.equal(await main(['status'], s.io), 1)
   assert.equal(await main(['status', '--json'], s.io), 1)
   assert.equal(JSON.parse(s.out.at(-1) ?? '').mode, 'running')

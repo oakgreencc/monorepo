@@ -3,7 +3,7 @@
 title: canopy
 description: canopy's flags, tabs, HTTP endpoints and what it reads from cambium and mycelium.
 sidebar:
-order: 6
+  order: 6
 ---
 
 canopy is a local, read-only page over cambium's heartbeat, the GitHub queues, cambium's traces and mycelium's intake sources. It holds no credentials and writes nothing.
