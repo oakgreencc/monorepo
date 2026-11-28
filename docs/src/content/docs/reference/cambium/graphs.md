@@ -45,6 +45,7 @@ to-human       → end
 
 - `submit`: history `submitted`, `submittedAt`, the PR on the marker, the issue out of every queue, `Closes #n` added to a PR found only by its branch.
 - A worker exiting without a PR, or killed at `wallClockMinutes`, goes to `requeue`. Spent attempts: `q:human` + `why:budget`.
+- A worker exiting without a PR after posting a hand-off comment (first line `<!-- cambium:hand-off -->`, outcome `handed-off`) goes from `requeue` to `to-human` at once.
 - Turns stop at a wait that is not ready, on entering a wait, on returning to `start-worker`, or at the end.
 
 ## pr

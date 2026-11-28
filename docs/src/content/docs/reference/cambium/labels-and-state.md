@@ -29,6 +29,7 @@ GitHub holds cambium's state. Only cambium moves these labels; workers have `gra
 | `wait:deferred`                               | Parked by a `defer` verdict until `deferUntil`.                                                 |
 | `wait:blocked`                                | Parked until its GitHub "blocked by" issues close.                                              |
 | `red-base`                                    | A repair issue cambium opened for a red base branch.                                            |
+| `watch`                                       | An issue cambium opened for a failing [watched workflow](/reference/cambium/configuration/#reposwatch). |
 | `rescue`                                      | A root-cause ticket filed by the rescue graph.                                                  |
 | `stall`                                       | With `q:human`: a report of issues that block each other, or wait on a `q:human` issue.         |
 | `priority:critical` … `priority:low`          | Scheduling order (configurable via `priorityLabels`).                                           |
@@ -131,7 +132,7 @@ While the decision is `leased` or `paused`, a reply on the issue does not send i
 
 ## Requeue
 
-A requeue sets `q:task` with `attempt + 1`. Once `maxAttempts` are spent: `q:human` + `why:budget`. During a [red base](/explanation/merging-and-red-base/) a failure requeues at the same attempt (`base-red`).
+A requeue sets `q:task` with `attempt + 1`. Once `maxAttempts` are spent: `q:human` + `why:budget`. A worker that posted a hand-off comment (first line `<!-- cambium:hand-off -->`) and published no PR goes to `q:human` + `why:budget` at once. During a [red base](/explanation/merging-and-red-base/) a failure requeues at the same attempt (`base-red`).
 
 ## Worker
 

@@ -44,9 +44,10 @@ import { assertMigrated, forestPath, readForest, sectionOf } from './forest.mjs'
  *   channel in use needs at least one.
  *   `idleHours` (default 24): no reply for this long pauses the decision until the next one.
  * @typedef {Partial<Record<'task' | 'dispatch' | 'rescue' | 'decide', { wallClockMinutes?: number, maxTurns?: number }>>} RepoPhases
- * @typedef {{ workflow: string, branch: string, issue: boolean }} Watch
+ * @typedef {{ workflow: string, branch: string, issue: boolean, agent: boolean }} Watch
  *   `workflow`: the workflow file name (`release.yml`) or its id. `branch` (default: the repo's `baseBranch`).
- *   `issue` (default true): a failing run opens one `q:human` issue, closed once the workflow is green again.
+ *   `issue` (default true): a failing run opens one issue, closed once the workflow is green again. `agent`
+ *   (default true): that issue is a high-priority `q:task` for a worker to fix; false: a `q:human` issue.
  * @typedef {{ cap: number, wallClockMinutes: number, maxTurns: number, maxAttempts: number }} PhaseCaps
  * @typedef {PhaseCaps & { maxReworks: number }} TaskCaps
  *   `maxReworks`: how many times the PR graph sends one PR back to a worker (red CI, a conflict, changes
@@ -220,7 +221,9 @@ function repoWatch(slug, raw, baseBranch) {
     if (typeof branch !== 'string') throw new Error(`config: repo ${slug} watch[${i}].branch must be a branch name`)
     const issue = typeof w === 'object' && w.issue !== undefined ? w.issue : true
     if (typeof issue !== 'boolean') throw new Error(`config: repo ${slug} watch[${i}].issue must be true or false`)
-    return { workflow, branch, issue }
+    const agent = typeof w === 'object' && w.agent !== undefined ? w.agent : true
+    if (typeof agent !== 'boolean') throw new Error(`config: repo ${slug} watch[${i}].agent must be true or false`)
+    return { workflow, branch, issue, agent }
   })
 }
 

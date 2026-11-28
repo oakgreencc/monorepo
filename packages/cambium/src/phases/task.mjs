@@ -103,3 +103,34 @@ export async function linkIssue(deps, slug, pr, issue) {
     )
   }
 }
+
+/**
+ * The first line of a worker's hand-off comment: posted on its issue when the fix is one only a person can make
+ * (a workflow file, a secret, an outage), followed by its findings. A worker that exits without a PR after
+ * posting one goes straight to `q:human` (`why:budget`), whatever attempts it has left.
+ */
+export const HAND_OFF = '<!-- cambium:hand-off -->'
+
+/**
+ * The newest hand-off comment posted on `issue` since `since` (epoch ms, the worker's start), or null.
+ * @param {import('../github.mjs').Issue | undefined | null} issue @param {number} since
+ */
+export function handOffOf(issue, since) {
+  return (
+    (issue?.comments ?? []).findLast(
+      (c) => c.body.trimStart().startsWith(HAND_OFF) && Date.parse(c.createdAt) >= since,
+    ) ?? null
+  )
+}
+
+/** The hand-off as a failure reason: its first line of findings, at most 300 characters. @param {{ body: string }} c */
+export const handOffReason = (c) => {
+  const first =
+    c.body
+      .trimStart()
+      .slice(HAND_OFF.length)
+      .split('\n')
+      .map((l) => l.trim())
+      .find(Boolean) ?? ''
+  return `worker handed off to a person${first ? `: ${first.length > 300 ? `${first.slice(0, 300)}…` : first}` : ''} (findings on the issue)`
+}
