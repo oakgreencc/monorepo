@@ -122,13 +122,15 @@ import { parseDecideMarker } from './graphs/decide.mjs'
  *   closedPulls(slug: string): Promise<PullRequest[]>,
  *   readIssues(slug: string, numbers: number[]): Promise<Map<number, Issue>>,
  *   workflowRuns(slug: string, workflow: string, branch: string): Promise<import('./watch.mjs').WorkflowRun[]>,
+ *   runFailure?(slug: string, runId: number): Promise<import('./watch.mjs').RunFailure>,
  *   mergeRules(slug: string, base: string): Promise<MergeRules>,
  *   mergeCommit(slug: string, number: number): Promise<string | null>,
  * }} GitHub
  *   `probe`: optional; without it every tick reads the full snapshot. `etags`: the last probe's, by request.
  *   `mergeRules`: what `base` requires before a merge ({@link MergeRules}); read only for a PR already stalled.
  *   `workflowRuns`: the newest completed push or schedule runs of `workflow` (file name or id) on `branch`, newest
- *   first (watch.mjs). `mergeCommit`: the commit a merged PR made on its base (null: not merged), for a workflow
+ *   first (watch.mjs). `runFailure`: a run's failed jobs with their failed steps, and the tail of the first failed
+ *   job's log (null when it cannot be read), for the issue a red watched workflow opens. `mergeCommit`: the commit a merged PR made on its base (null: not merged), for a workflow
  *   promotion signal (promotion.mjs).
  *   `greenCommit`: the newest commit on `ref`'s first-parent line, at most `depth` back, whose `check` concluded
  *   success (`check` null: the tip). `compareRange`: GitHub's compare of `base...head`. `branches`: the branch
@@ -883,6 +885,25 @@ export function graftGitHub({ config, exec: run = exec, now = Date.now }) {
           conclusion: String(r.conclusion ?? ''),
           at: r.updated_at ?? r.created_at,
         }))
+    },
+    async runFailure(slug, runId) {
+      const path = `/repos/${slug}/actions/runs/${runId}/jobs?filter=latest&per_page=100`
+      const data = await json(graft(slug, ['api', 'GET', path]))
+      const jobs = (data?.jobs ?? [])
+        .filter((/** @type {any} */ j) => j.conclusion === 'failure' || j.conclusion === 'timed_out')
+        .map((/** @type {any} */ j) => ({
+          id: j.id,
+          name: String(j.name ?? ''),
+          url: j.html_url ?? null,
+          steps: (j.steps ?? [])
+            .filter((/** @type {any} */ s) => s.conclusion === 'failure' || s.conclusion === 'timed_out')
+            .map((/** @type {any} */ s) => String(s.name ?? '')),
+        }))
+      /** @type {string | null} */
+      let log = null
+      if (jobs[0])
+        log = await graft(slug, ['api', 'GET', `/repos/${slug}/actions/jobs/${jobs[0].id}/logs`]).catch(() => null)
+      return { jobs, log }
     },
     async mergeRules(slug, base) {
       const ref = encodeURIComponent(base)

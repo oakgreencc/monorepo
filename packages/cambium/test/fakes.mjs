@@ -109,6 +109,10 @@ export function fakeGitHub({ issues = [], prs = [] } = {}) {
   const health = { base: null, rateLimit: null }
   /** Workflow runs by `<workflow>@<branch>`, newest first (watch.mjs). @type {Map<string, import("../src/watch.mjs").WorkflowRun[]>} */
   const runs = new Map()
+  /** Failed jobs and log by run id (watch.mjs). @type {Map<number, import("../src/watch.mjs").RunFailure>} */
+  const failures = new Map()
+  /** Commits by `<base>...<head>`, oldest first as GitHub's compare lists them. @type {Map<string, { sha: string, message: string }[]>} */
+  const compares = new Map()
   /** The rules `mergeRules` reports, by base branch; a base not here has none. @type {Map<string, import("../src/github.mjs").MergeRules>} */
   const rules = new Map()
   let nextIssue = 9000
@@ -233,6 +237,24 @@ export function fakeGitHub({ issues = [], prs = [] } = {}) {
       if (faults.runsError) throw faults.runsError
       return [...(runs.get(`${workflow}@${branch}`) ?? [])]
     },
+    async runFailure(slug, runId) {
+      calls.push({ op: 'runFailure', args: [slug, runId] })
+      const f = failures.get(runId)
+      if (!f) throw new Error(`no jobs for run ${runId}`)
+      return f
+    },
+    async compareRange(slug, base, head) {
+      calls.push({ op: 'compareRange', args: [slug, base, head] })
+      const commits = compares.get(`${base}...${head}`)
+      if (!commits) throw new Error(`no compare ${base}...${head}`)
+      return {
+        status: 'ahead',
+        aheadBy: commits.length,
+        behindBy: 0,
+        files: 0,
+        commits: commits.map((c) => ({ ...c, parents: [] })),
+      }
+    },
     async mergeRules(slug, base) {
       calls.push({ op: 'mergeRules', args: [slug, base] })
       if (faults.rulesError) throw faults.rulesError
@@ -287,6 +309,8 @@ export function fakeGitHub({ issues = [], prs = [] } = {}) {
     commentClock,
     health,
     runs,
+    failures,
+    compares,
     rules,
     pulls,
     issue: (/** @type {number} */ n) => /** @type {Required<FakeIssue>} */ (store.get(n)),

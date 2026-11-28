@@ -15,7 +15,7 @@ import { withHistory } from './marker.mjs'
 import { failureSummary, iso, key, markerOf, MIN, setLabels, setMarker } from './issue-state.mjs'
 import { GRAPH_ENGINE, GRAPHS } from './graph-engine.mjs'
 import { describeGraph } from './graph/describe.mjs'
-import { linkIssue, prFor, taskExit, taskPrompt } from './phases/task.mjs'
+import { handOffOf, handOffReason, linkIssue, prFor, taskExit, taskPrompt } from './phases/task.mjs'
 import { adopt } from './adopt.mjs'
 import { branchName } from './convention.mjs'
 import { PREPARE_FAILED_LINE } from './prepare.mjs'
@@ -512,6 +512,9 @@ export async function finish(deps, ctx, w, snap) {
     ctx.touched.add(key(w.repo, w.issue))
     deps.log('info', `submitted PR #${pr.number}; watching CI`, { repo: w.repo, issue: w.issue })
     await linkIssue(deps, w.repo, pr, w.issue)
+  } else if (!w.killedReason && !prepFailed && pr?.state !== 'OPEN' && handOffOf(issue, w.startedAt)) {
+    const handOff = /** @type {{ body: string }} */ (handOffOf(issue, w.startedAt))
+    await toHuman(deps, ctx, w.repo, issue, { reason: handOffReason(handOff), outcome: 'handed-off', log: w.stdout })
   } else {
     const tail = deps.spawner.tail(w.stderr, 15)
     const reason = `${'reason' in verdict ? verdict.reason : 'worker failed'}${tail ? `\n--- stderr (last lines, ${w.stderr})\n${tail}` : ''}`

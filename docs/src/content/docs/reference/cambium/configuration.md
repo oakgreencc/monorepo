@@ -98,7 +98,7 @@ A file that does not load, or has no `repos`, keeps the running config and logs 
 
 | Key                   | Default | Meaning                                                                                                   |
 | --------------------- | ------- | --------------------------------------------------------------------------------------------------------- |
-| `intake.adopt`        | `true`  | An open issue in no queue gains `q:intake`, so it is triaged without anyone adding the label. Skipped: issues cambium has handled (they have a state comment), issues an agent PR names, and issues labelled `watch`, `red-base`, `rescue` or `stall`. |
+| `intake.adopt`        | `true`  | An open issue in no queue gains `q:intake`, so it is triaged without anyone adding the label. Skipped: issues cambium has handled (they have a state comment), issues an agent PR names, and issues labelled `watch`, `red-base`, `rescue` or `stall`. Those are opened with their own queue (a `watch` issue in `q:task` or `q:human`, per [`repos[].watch`](#reposwatch)). |
 | `intake.ignoreLabels` | `[]`    | Issues with any of these labels are never adopted, such as tracking or parent issues.                     |
 
 ## `repos[]`
@@ -126,18 +126,26 @@ Any other value is refused.
 
 ### `repos[].watch`
 
-Each entry is a workflow file name (`"cd.yml"`), or `{ "workflow", "branch", "issue" }`. `branch` defaults to the repo's `baseBranch`; `issue` defaults to `true`.
+Each entry is a workflow file name (`"cd.yml"`), or `{ "workflow", "branch", "issue", "agent" }`. `branch` defaults to the repo's `baseBranch`; `issue` and `agent` default to `true`.
 
 Every `watchEveryMinutes`, cambium reads the newest completed push or schedule run of each workflow on its branch. Cancelled and skipped runs are passed over.
 
-- A failed, timed-out or startup-failed run logs a `warn` event. With `issue: true` it also opens one `q:human` issue labelled `watch` (only `q:human` if the repo lacks that label). A later failing run comments on that issue.
+- A failed, timed-out or startup-failed run logs a `warn` event. With `issue: true` it also opens one issue labelled `watch` (without that label if the repo lacks it).
+- With `agent: true` the issue is a Task: `q:task` and the second priority label (`priority:high` by default). Its body names the run, the commit, the failed jobs and steps, the last 40 lines of the first failed job's log, and the commits since the last green run. The worker fixes forward or reverts.
+- A worker that cannot push the fix (a change under `.github/workflows/**`, a secret, an outage) posts its findings on the issue, starting with the line `<!-- cambium:hand-off -->`, and exits without a PR. The issue goes to `q:human` + `why:budget` at once. So does a watch Task whose `task.maxAttempts` run out.
+- With `agent: false` the issue goes straight to `q:human`.
+- A later failing run comments on the open issue, whatever its queue.
 - The next green run logs an `info` event and closes the issue.
 - A read that fails keeps the last verdict.
 
 Verdicts are kept in the store across restarts, and each repo's are in the heartbeat as `repos[].watch`.
 
 ```json
-"watch": ["release.yml", { "workflow": "e2e.yml", "branch": "develop", "issue": false }]
+"watch": [
+  "docs.yml",
+  { "workflow": "deploy.yml", "branch": "main", "agent": false },
+  { "workflow": "e2e.yml", "branch": "develop", "issue": false }
+]
 ```
 
 ## `phases`

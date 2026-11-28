@@ -15,7 +15,7 @@ import { branchName } from '../convention.mjs'
 import { iso, key, markerOf, setLabels, setMarker } from '../issue-state.mjs'
 import { move, Q, WHY } from '../labels.mjs'
 import { withHistory } from '../marker.mjs'
-import { linkIssue, prFor, taskExit, taskPrompt } from '../phases/task.mjs'
+import { handOffOf, handOffReason, linkIssue, prFor, taskExit, taskPrompt } from '../phases/task.mjs'
 import { PREPARE_FAILED_LINE } from '../prepare.mjs'
 import { traceWorker } from '../tracing.mjs'
 import { recordCost } from '../cost.mjs'
@@ -109,6 +109,8 @@ export const failure = {
   pr: z.number().int().optional(),
   log: z.string().optional(),
   failedSha: z.string().nullable().optional(),
+  /** The worker posted a hand-off comment (phases/task.mjs `HAND_OFF`): straight to a person. */
+  handOff: z.boolean().optional(),
   /** Where the failure happened, when that is not the node the marker rests at. */
   at: z.string().optional(),
 }
@@ -295,6 +297,18 @@ const workerRunning = declare(
           : taskExit(pr, m)
       if (verdict.ok && pr)
         return { ready: true, output: { exit: 'submitted', pr: pr.number, branch: pr.branch, log: w.stdout } }
+      const handOff = !w.killedReason && !prepFailed && pr?.state !== 'OPEN' ? handOffOf(issue, w.startedAt) : null
+      if (handOff)
+        return {
+          ready: true,
+          output: {
+            exit: 'failed',
+            reason: handOffReason(handOff),
+            outcome: 'handed-off',
+            handOff: true,
+            log: w.stdout,
+          },
+        }
       const tail = spawner.tail(w.stderr, 15)
       return {
         ready: true,
@@ -374,15 +388,17 @@ const requeue = declare(
       z.object({ to: z.literal('human'), ...failure }),
     ]),
     /**
-     * Back to `q:task` with attempt + 1, or to the Human Queue once the attempts are spent. While the base is red
-     * (base-health.mjs) a failure is not the work's own: it requeues at the same attempt, never to the Human
-     * Queue, and Schedule holds it until the base is green. The repair issue itself is charged as usual.
+     * Back to `q:task` with attempt + 1, or to the Human Queue once the attempts are spent or the worker handed
+     * the issue off. While the base is red (base-health.mjs) a failure is not the work's own: it requeues at the
+     * same attempt, never to the Human Queue, and Schedule holds it until the base is green. The repair issue
+     * itself is charged as usual.
      * @param {z.infer<typeof Failure>} what @param {TaskCtx} ctx
      */
     run: async (what, ctx) => {
       const issue = issueOf(ctx)
       const m = markerOf(issue)
       const max = ctx.config.phases.task.maxAttempts
+      if (what.handOff) return { ...what, to: 'human' }
       const free = baseRed(ctx.subject.snap) && !isRepair(issue)
       if (m.attempt >= max && !free)
         return { ...what, to: 'human', reason: `${max} attempts spent. Last: ${what.reason}` }
